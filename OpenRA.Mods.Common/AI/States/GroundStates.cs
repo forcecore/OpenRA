@@ -22,16 +22,20 @@ namespace OpenRA.Mods.Common.AI
 			return base.ShouldFlee(owner, enemies => !AttackOrFleeFuzzy.Default.CanAttack(owner.Units, enemies));
 		}
 
-		protected void LogBattle(Squad owner)
+		protected void LogBattle(Squad owner, string prefix)
 		{
 			var stats = owner.Bot.Player.PlayerActor.Trait<PlayerStatistics>();
-			Log.Write("lua", "EOB_MY_DEATH_COST");
-			Log.Write("lua", stats.DeathsCost.ToString());
+			//owner.Bot.Send(prefix + "_MY_DEATH_COST");
+			owner.Bot.Send(prefix + "_DEATH_COST");
+			owner.Bot.Send(owner.Bot.Player.InternalName);
+			owner.Bot.Send(stats.DeathsCost.ToString());
 
-			Log.Write("lua", "EOB_ENEMY_DEATH_COST");
+			//owner.Bot.Send(prefix + "_ENEMY_DEATH_COST");
 			var enemy = owner.World.Players.Where(p => p.InternalName.ToLower().StartsWith("multi") && p != owner.Bot.Player).First();
 			var stats2 = enemy.PlayerActor.Trait<PlayerStatistics>();
-			Log.Write("lua", stats2.DeathsCost.ToString());
+			owner.Bot.Send(enemy.InternalName);
+			owner.Bot.Send(stats2.DeathsCost.ToString());
+			owner.Bot.Send("END");
 		}
 	}
 
@@ -65,23 +69,22 @@ namespace OpenRA.Mods.Common.AI
 					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsAttackMoveState(), true);
 
 					// start log
-					Log.Write("lua", "START_ATTACK");
-					Log.Write("lua", "MINE");
+					/*
+					owner.Bot.Send("MINE");
+					owner.Bot.Send(owner.Bot.Player.InternalName);
 					foreach (var u in owner.Units)
-						Log.Write("lua", u.Info.Name);
-					Log.Write("lua", "ENEMY");
+						owner.Bot.Send(u.Info.Name);
+					owner.Bot.Send("END");
 
 					var enemy = owner.World.Players.Where(p => p.InternalName.ToLower().StartsWith("multi") && p != owner.Bot.Player).First();
+					owner.Bot.Send("ENEMY");
+					owner.Bot.Send(enemy.InternalName);
 					foreach (var a in owner.Bot.World.Actors.Where(x => x.Owner == enemy))
-						Log.Write("lua", a.Info.Name);
+						owner.Bot.Send(a.Info.Name);
+					owner.Bot.Send("END");
 
-					Log.Write("lua", "VS_END");
-					var stats = owner.Bot.Player.PlayerActor.Trait<PlayerStatistics>();
-					Log.Write("lua", "MY_DEATH_COST");
-					Log.Write("lua", stats.DeathsCost.ToString());
-					Log.Write("lua", "ENEMY_DEATH_COST");
-					var stats2 = owner.TargetActor.Owner.PlayerActor.Trait<PlayerStatistics>();
-					Log.Write("lua", stats2.DeathsCost.ToString());
+					LogBattle(owner, "B4B");
+					*/
 					return;
 				}
 				else
@@ -141,9 +144,13 @@ namespace OpenRA.Mods.Common.AI
 						owner.Bot.QueueOrder(new Order("AttackMove", a, false) { TargetLocation = owner.TargetActor.Location });
 			}
 
+			// Wiped out
+			//if (!owner.IsValid)
+			//	LogBattle(owner, "AFTERB");
+
 			if (ShouldFlee(owner))
 			{
-				LogBattle(owner);
+				//LogBattle(owner, "AFTERB");
 				owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
 				return;
 			}
@@ -177,9 +184,13 @@ namespace OpenRA.Mods.Common.AI
 				if (!BusyAttack(a))
 					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = owner.Bot.FindClosestEnemy(a.CenterPosition) });
 
+			// Wiped out
+			//if (!owner.IsValid)
+			//	LogBattle(owner, "AFTERB");
+
 			if (ShouldFlee(owner))
 			{
-				LogBattle(owner);
+				//LogBattle(owner, "AFTERB");
 				owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
 				return;
 			}

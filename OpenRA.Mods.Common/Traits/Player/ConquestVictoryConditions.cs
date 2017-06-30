@@ -81,12 +81,20 @@ namespace OpenRA.Mods.Common.Traits
 			if (info.SuppressNotifications)
 				return;
 
+			var hackyAI = player.PlayerActor.TraitsImplementing<AI.HackyAI>().Where(b => b.IsEnabled).FirstOrDefault();
+			hackyAI.Send("WIN");
+			hackyAI.Send(player.InternalName);
+			hackyAI.Send("END");
+
 			Game.AddChatLine(Color.White, "Battlefield Control", player.PlayerName + " is victorious.");
 			Game.RunAfterDelay(info.NotificationDelay, () =>
 			{
 				if (Game.IsCurrentWorld(player.World) && player == player.World.LocalPlayer)
 					Game.Sound.PlayNotification(player.World.Map.Rules, player, "Speech", "Win", player.Faction.InternalName);
 			});
+
+			if (Game.Settings.Debug.AutoRestart)
+				Game.RestartGame();
 		}
 
 		public void OnObjectiveAdded(Player player, int id) { }

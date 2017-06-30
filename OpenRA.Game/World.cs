@@ -154,7 +154,11 @@ namespace OpenRA
 			orderGenerator = new UnitOrderGenerator();
 			Map = map;
 			Timestep = orderManager.LobbyInfo.GlobalSettings.Timestep;
-			SharedRandom = new MersenneTwister(orderManager.LobbyInfo.GlobalSettings.RandomSeed);
+
+			if (Game.Settings.Debug.RandomizedRestart)
+				SharedRandom = new MersenneTwister((int)DateTime.Now.ToBinary());
+			else
+				SharedRandom = new MersenneTwister(orderManager.LobbyInfo.GlobalSettings.RandomSeed);
 
 			var worldActorType = type == WorldType.Editor ? "EditorWorld" : "World";
 			WorldActor = CreateActor(worldActorType, new TypeDictionary());

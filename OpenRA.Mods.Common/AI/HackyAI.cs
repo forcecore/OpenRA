@@ -1402,10 +1402,10 @@ namespace OpenRA.Mods.Common.AI
 			}
 		}
 
-		void Send(UdpClient udp, string msg)
+		public void Send(string msg)
 		{
 			var sendBytes = Encoding.UTF8.GetBytes(msg);
-			udp.Send(sendBytes, sendBytes.Length);
+			client.Send(sendBytes, sendBytes.Length);
 		}
 
 		void QueryPipe(string category, IEnumerable<Actor> unit)
@@ -1419,9 +1419,22 @@ namespace OpenRA.Mods.Common.AI
 			if (!buildableThings.Any())
 				return;
 
+			Send("UNIT_QUERY");
+			Send(Player.InternalName);
+
+			Send(buildableThings.Count().ToString());
 			foreach (var b in buildableThings)
-				Send(client, b.Name);
-			Send(client, "END");
+				Send(b.Name);
+
+			var mine = World.Actors.Where(a => a.Owner == Player);
+			Send(mine.Count().ToString());
+			foreach (var u in mine)
+				Send(u.Info.Name);
+
+			// The remaining are enemy units
+			foreach (var u in World.Actors.Where(isEnemyUnit))
+				Send(u.Info.Name);
+			Send("END");
 
 			// Get incoming result
 			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);

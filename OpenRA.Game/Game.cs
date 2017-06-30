@@ -44,7 +44,7 @@ namespace OpenRA
 		public static ICursor Cursor;
 		static WorldRenderer worldRenderer;
 
-		internal static OrderManager OrderManager;
+		public static OrderManager OrderManager; // AI devel
 		static Server.Server server;
 
 		public static MersenneTwister CosmeticRandom = new MersenneTwister(); // not synced
@@ -187,6 +187,11 @@ namespace OpenRA
 
 		public static void RestartGame()
 		{
+			string[] maps = {
+				"9a0be9fc201c0fe99407e2a2962b66629fb7b2cc", // Tournament Island
+				"e68de523a7c7429b91fd2f71006d4afdb27119a3", // War Wind
+				"e253a6bfdc0f2d570227f110ed07cb8e1edb32c4" // Keep off the grass 2
+			};
 			var replay = OrderManager.Connection as ReplayConnection;
 			var replayName = replay != null ? replay.Filename : null;
 			var lobbyInfo = OrderManager.LobbyInfo;
@@ -194,6 +199,17 @@ namespace OpenRA
 					Order.Command("sync_lobby {0}".F(lobbyInfo.Serialize())),
 					Order.Command("startgame")
 			};
+
+			if (Game.Settings.Debug.RandomizedRestartMap)
+			{
+				var map = maps.Random(worldRenderer.World.SharedRandom);
+				lobbyInfo.GlobalSettings.Map = map;
+				orders = new[] {
+						Order.Command("map {0}".F(map)),
+						Order.Command("sync_lobby {0}".F(lobbyInfo.Serialize())),
+						Order.Command("startgame")
+				};
+			}
 
 			// Disconnect from the current game
 			Disconnect();

@@ -96,6 +96,10 @@ namespace OpenRA
 		public bool SendSystemInformation = true;
 		public int SystemInformationVersionPrompt = 0;
 		public string UUID = System.Guid.NewGuid().ToString();
+
+		public bool AutoRestart = true; // auto-restart at end of game?
+		public bool RandomizedRestart = true; // on restart, do we randomize everything?
+		public bool RandomizedRestartMap = true; // on restart, do we randomized the map?
 	}
 
 	public class GraphicSettings
