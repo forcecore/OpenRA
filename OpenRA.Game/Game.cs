@@ -187,10 +187,28 @@ namespace OpenRA
 
 		public static void RestartGame()
 		{
+			// To see the UUIDs, put break point in OrderManager.cs:IssueOrder()
 			string[] maps = {
 				"9a0be9fc201c0fe99407e2a2962b66629fb7b2cc", // Tournament Island
 				"e68de523a7c7429b91fd2f71006d4afdb27119a3", // War Wind
-				"e253a6bfdc0f2d570227f110ed07cb8e1edb32c4" // Keep off the grass 2
+				"e253a6bfdc0f2d570227f110ed07cb8e1edb32c4", // Keep off the grass 2
+				"7949a8fb0f526639cf8f6c0bd0d54b2d9f403012", // Desert Rats
+				"e1248630d8444f5b690ba10ae8cd85b1e2f9c5ea", // behind the veil
+				"3af992743d6803ca259240f2e47a1b1dc865547a", // dual cold front
+				"fd535351bc61912d49f02f9c1ff54fec535231fc", // green belt
+				"6382a91476f7927a445e93be6dcd99c9e51ef661", // north west passage
+				"a41a87f70d9ba0bda45ba2dd126ce9b76a42a2ed", // ore lord,
+				"831e38f0906b9da68607a6cadf008c394db631df", // Polar disorder
+				"0105dc08ddc11829327eb6b2ecb0037a71407017", // siberian pass
+				"5bea6c8d4522a4881f75af5171f341cf4197b25f", // side step
+				"35d0a9c369173dbd5a4c1df9693e1fe96364ab81", // singles
+				"dc164f5562574650b2510abec8d152ab82444499", // snow off
+				"cfb65ac53a1d0b9089953cd177cb10ba17b64cec", // winter storm
+				"368c16bf4be5668e1423ab22a72346be4a8f0254", // bad neighbors
+				"e4b6a8614527e698744b2909a881c1594228d9cd", // cross fire
+				"e08f4382ffe8c7f4d9937cf635edeb0c498cf3f7", // ghost town
+				"8f0b4ab3945a77a3e597c5be9d64a9d80658da0d", // x lake
+				"a6099b1fe4f49878aa968d530613cc7805626fab" // north by north west
 			};
 			var replay = OrderManager.Connection as ReplayConnection;
 			var replayName = replay != null ? replay.Filename : null;

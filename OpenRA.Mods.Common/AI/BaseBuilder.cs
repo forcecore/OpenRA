@@ -384,7 +384,21 @@ namespace OpenRA.Mods.Common.AI
 				// Do we want to build this structure?
 				var count = playerBuildings.Count(a => a.Info.Name == name);
 				if (count > frac.Value * playerBuildings.Length)
-					continue;
+				{
+					// Game goes too turtly if we include defense
+					//if (queue.Info.Type == "Defense" || ai.Info.BuildingCommonNames.Refinery.Contains(ai.Info.Name))
+					if (ai.Info.BuildingCommonNames.Refinery.Contains(ai.Info.Name))
+					{
+						// If defense or proc, multiply it by # of FACT.
+						var facts = playerBuildings.Where(a => ai.Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)).Count();
+						if (count > frac.Value * playerBuildings.Length * facts)
+							continue;
+					}
+					else
+					{
+						continue;
+					}
+				}
 
 				if (ai.Info.BuildingLimits.ContainsKey(name) && ai.Info.BuildingLimits[name] <= count)
 					continue;

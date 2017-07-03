@@ -49,7 +49,11 @@ namespace OpenRA.Mods.Common.AI
 		{
 			public readonly HashSet<string> Mcv = new HashSet<string>();
 			public readonly HashSet<string> Seige = new HashSet<string>();
+			public readonly HashSet<string> ResourceSpawner = new HashSet<string>(); // tiberium tree, ore mine... Used for expansion algorithm.
+			public readonly HashSet<string> DemoUnits = new HashSet<string>(); // these units blow up badly that are unwelcome in base
+			public readonly HashSet<string> Ships = new HashSet<string>();
 			public readonly HashSet<string> ExcludeFromSquads = new HashSet<string>();
+			public readonly HashSet<string> ExcludeFromAttackSquads = new HashSet<string>(); // they can be seen by AI but not belong to attack force (like engis)
 		}
 
 		public class BuildingCategories
@@ -77,7 +81,8 @@ namespace OpenRA.Mods.Common.AI
 		public readonly bool EnableLuaUnitProduction = false;
 
 		[Desc("EXPERIMENTAL")]
-		public readonly bool PipeExternalQuery = false;
+		public readonly bool NNProduction = false;
+		public readonly bool NNPlacement = false;
 
 		[Desc("Minimum number of units AI must have before attacking.")]
 		public readonly int SquadSize = 8;
@@ -285,7 +290,7 @@ namespace OpenRA.Mods.Common.AI
 		readonly ResourceClaimLayer territory;
 		readonly IPathFinder pathfinder;
 
-		readonly Func<Actor, bool> isEnemyUnit;
+		public readonly Func<Actor, bool> IsEnemyUnit;
 		Dictionary<SupportPowerInstance, int> waitingPowers = new Dictionary<SupportPowerInstance, int>();
 		Dictionary<string, SupportPowerDecision> powerDecisions = new Dictionary<string, SupportPowerDecision>();
 
@@ -300,6 +305,7 @@ namespace OpenRA.Mods.Common.AI
 		List<BaseBuilder> builders = new List<BaseBuilder>();
 
 		List<Actor> unitsHangingAroundTheBase = new List<Actor>();
+		List<Actor> capturableStuff = new List<Actor>();
 
 		// Units that the ai already knows about. Any unit not on this list needs to be given a role.
 		List<Actor> activeUnits = new List<Actor>();
@@ -337,7 +343,7 @@ namespace OpenRA.Mods.Common.AI
 			territory = World.WorldActor.TraitOrDefault<ResourceClaimLayer>();
 			pathfinder = World.WorldActor.Trait<IPathFinder>();
 
-			isEnemyUnit = unit =>
+			IsEnemyUnit = unit =>
 				IsOwnedByEnemy(unit)
 					&& !unit.Info.HasTraitInfo<HuskInfo>()
 					&& unit.Info.HasTraitInfo<ITargetableInfo>();
@@ -553,6 +559,12 @@ namespace OpenRA.Mods.Common.AI
 
 		public bool HasMinimumProc()
 		{
+			// Build refs for expansions
+			var cys = World.Actors.Where(a => a.Owner == Player &&
+				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
+			if (cys.Count() >= 2 && CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) < 2 * cys.Count())
+				return false;
+
 			// Require at least two refineries, unless we have no power (can't build it)
 			// or barracks (higher priority?)
 			return CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) >= 2 ||
@@ -636,6 +648,37 @@ namespace OpenRA.Mods.Common.AI
 			return null;
 		}
 
+		public CPos? GetNoRefCY()
+		{
+			var cys = World.Actors.Where(a => a.Owner == Player &&
+				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)).ToList();
+			var refs = World.Actors.Where(a => a.Owner == Player &&
+				Info.BuildingCommonNames.Refinery.Contains(a.Info.Name));
+
+			if (cys.Count() == 0)
+				return null;
+
+			// If there's a CY without any ref within 10 cells, return it.
+			var coveredCYs = new List<Actor>();
+			foreach (var cy in cys)
+				foreach (var r in refs)
+				{
+					if ((r.Location - cy.Location).LengthSquared < 100)
+					{
+						coveredCYs.Add(cy);
+						break;
+					}
+				}
+
+			foreach (var cy in coveredCYs)
+				cys.Remove(cy);
+
+			if (cys.Count() == 0)
+				return null;
+
+			return cys.Random(Random).Location;
+		}
+
 		CPos defenseCenter;
 		public CPos? ChooseBuildLocation(string actorType, bool distanceToBaseIsImportant, BuildingPlacementType type)
 		{
@@ -680,6 +723,9 @@ namespace OpenRA.Mods.Common.AI
 					}
 
 				case BuildingPlacementType.Refinery:
+					var tmp = GetNoRefCY();
+					if (tmp != null)
+						baseCenter = tmp.Value;
 
 					// Try and place the refinery near a resource field
 					var nearbyResources = Map.FindTilesInAnnulus(baseCenter, Info.MinBaseRadius, Info.MaxBaseRadius)
@@ -747,14 +793,32 @@ namespace OpenRA.Mods.Common.AI
 				World.IssueOrder(orders.Dequeue());
 		}
 
+		int2 cpos2uv(CPos location)
+		{
+			int SZ = 32;
+			int y = SZ * (location.Y - World.Map.Bounds.Top) / World.Map.Bounds.Height;
+			int x = SZ * (location.X - World.Map.Bounds.Left) / World.Map.Bounds.Width;
+			// Some stuff are actually OUTSIDE the map.
+			if (y < 0)
+				y = 0;
+			if (x < 0)
+				x = 0;
+			if (y > SZ - 1)
+				y = SZ - 1;
+			if (x > SZ - 1)
+				x = SZ - 1;
+
+			return new int2(x, y);
+		}
+
 		internal Actor FindClosestEnemy(WPos pos)
 		{
-			return World.Actors.Where(isEnemyUnit).ClosestTo(pos);
+			return World.Actors.Where(IsEnemyUnit).ClosestTo(pos);
 		}
 
 		internal Actor FindClosestEnemy(WPos pos, WDist radius)
 		{
-			return World.FindActorsInCircle(pos, radius).Where(isEnemyUnit).ClosestTo(pos);
+			return World.FindActorsInCircle(pos, radius).Where(IsEnemyUnit).ClosestTo(pos);
 		}
 
 		List<Actor> FindEnemyConstructionYards()
@@ -806,9 +870,9 @@ namespace OpenRA.Mods.Common.AI
 			if (--assignRolesTicks <= 0)
 			{
 				assignRolesTicks = Info.AssignRolesInterval;
-				////KillOutOfMapAircrafts();
 				GiveOrdersToIdleHarvesters();
 				FindNewUnits(self);
+				SuicideDemoUnits(self);
 				FindAndDeployBackupMcv(self);
 			}
 
@@ -822,19 +886,6 @@ namespace OpenRA.Mods.Common.AI
 			{
 				minCaptureDelayTicks = Info.MinimumCaptureDelay;
 				QueueCaptureOrders();
-			}
-		}
-
-		void KillOutOfMapAircrafts()
-		{
-			var map = World.Map;
-			var toKill = World.ActorsHavingTrait<IPositionable>()
-				.Where(a => a.Owner == Player && !map.Contains(a.Location));
-
-			foreach (var a in toKill)
-			{
-				a.CancelActivity();
-				a.QueueActivity(new CallFunc(() => a.Kill(a)));
 			}
 		}
 
@@ -852,6 +903,17 @@ namespace OpenRA.Mods.Common.AI
 					yield return actor;
 		}
 
+		// How many units are protecting this actor?
+		int ProtectionLevel(Actor a)
+		{
+			int threat = 0;
+			var neighbors = World.FindActorsInCircle(a.CenterPosition, WDist.FromCells(5));
+			foreach (var nei in neighbors)
+				if (nei.TraitsImplementing<AttackBase>().Count() > 0)
+					threat++;
+			return threat;
+		}
+
 		void QueueCaptureOrders()
 		{
 			if (!Info.CapturingActorTypes.Any() || Player.WinState != WinState.Undefined)
@@ -864,16 +926,25 @@ namespace OpenRA.Mods.Common.AI
 			var randPlayer = World.Players.Where(p => !p.Spectating
 				&& Info.CapturableStances.HasStance(Player.Stances[p])).Random(Random);
 
-			var targetOptions = Info.CheckCaptureTargetsForVisibility
+			var allTargetOptions = Info.CheckCaptureTargetsForVisibility
 				? GetVisibleActorsBelongingToPlayer(randPlayer)
-				: GetActorsThatCanBeOrderedByPlayer(randPlayer);
+				: World.Actors.Where(a => a.IsInWorld && !a.IsDead && Info.CapturableStances.HasStance(Player.Stances[a.Owner]) &&
+					(a.TraitOrDefault<Capturable>() != null || a.TraitOrDefault<ExternalCapturable>() != null));
+
+			var targetOptions = allTargetOptions;
+
+			if (Info.CapturableActorTypes.Any())
+				targetOptions = targetOptions.Where(target => Info.CapturableActorTypes.Contains(target.Info.Name.ToLowerInvariant()));
+
+			if (!targetOptions.Any())
+				targetOptions = allTargetOptions;
 
 			var capturableTargetOptions = targetOptions
 				.Select(a => new CaptureTarget<CapturableInfo>(a, "CaptureActor"))
 				.Where(target => target.Info != null && capturers.Any(capturer =>
 					target.Actor.TraitOrDefault<Capturable>() != null &&
 					target.Actor.TraitOrDefault<Capturable>().CanBeTargetedBy(capturer, target.Actor.Owner)))
-				.OrderByDescending(target => target.Actor.GetSellValue())
+				.OrderBy(target => ProtectionLevel(target.Actor))
 				.Take(maximumCaptureTargetOptions);
 
 			var externalCapturableTargetOptions = targetOptions
@@ -881,14 +952,8 @@ namespace OpenRA.Mods.Common.AI
 				.Where(target => target.Info != null && capturers.Any(capturer =>
 					target.Actor.TraitOrDefault<ExternalCapturable>() != null &&
 					target.Actor.TraitOrDefault<ExternalCapturable>().CanBeTargetedBy(capturer, target.Actor.Owner)))
-				.OrderByDescending(target => target.Actor.GetSellValue())
+				.OrderBy(target => ProtectionLevel(target.Actor))
 				.Take(maximumCaptureTargetOptions);
-
-			if (Info.CapturableActorTypes.Any())
-			{
-				capturableTargetOptions = capturableTargetOptions.Where(target => Info.CapturableActorTypes.Contains(target.Actor.Info.Name.ToLowerInvariant()));
-				externalCapturableTargetOptions = externalCapturableTargetOptions.Where(target => Info.CapturableActorTypes.Contains(target.Actor.Info.Name.ToLowerInvariant()));
-			}
 
 			if (!capturableTargetOptions.Any() && !externalCapturableTargetOptions.Any())
 				return;
@@ -896,11 +961,22 @@ namespace OpenRA.Mods.Common.AI
 			var capturesCapturers = capturers.Where(a => a.Info.HasTraitInfo<CapturesInfo>());
 			var externalCapturers = capturers.Except(capturesCapturers).Where(a => a.Info.HasTraitInfo<ExternalCapturesInfo>());
 
+			// At this point, capture order will happen. Remove capturers from any unitsHangingAroundBase
+			// So that they will not be recruited for now. (Will be recruited when they become idle again.)
+
 			foreach (var capturer in capturesCapturers)
+			{
+				if (unitsHangingAroundTheBase.Contains(capturer))
+					unitsHangingAroundTheBase.Remove(capturer);
 				QueueCaptureOrderFor(capturer, GetCapturerTargetClosestToOrDefault(capturer, capturableTargetOptions));
+			}
 
 			foreach (var capturer in externalCapturers)
+			{
+				if (unitsHangingAroundTheBase.Contains(capturer))
+					unitsHangingAroundTheBase.Remove(capturer);
 				QueueCaptureOrderFor(capturer, GetCapturerTargetClosestToOrDefault(capturer, externalCapturableTargetOptions));
+			}
 		}
 
 		void QueueCaptureOrderFor<TTargetType>(Actor capturer, CaptureTarget<TTargetType> target) where TTargetType : class, ITraitInfoInterface
@@ -980,18 +1056,38 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var a in newUnits)
 			{
 				if (a.Info.HasTraitInfo<HarvesterInfo>())
+				{
 					QueueOrder(new Order("Harvest", a, false));
-				else
-					unitsHangingAroundTheBase.Add(a);
+					activeUnits.Add(a);
+					continue;
+				}
 
-				if (a.Info.HasTraitInfo<AircraftInfo>() && a.Info.HasTraitInfo<AttackBaseInfo>())
+				unitsHangingAroundTheBase.Add(a);
+				if (Info.CapturingActorTypes.Contains(a.Info.Name))
+					QueueCaptureOrders();
+				else if (a.Info.HasTraitInfo<AircraftInfo>() && a.Info.HasTraitInfo<AttackBaseInfo>())
 				{
 					var air = GetSquadOfType(SquadType.Air);
 					if (air == null)
 						air = RegisterNewSquad(SquadType.Air);
 
-					air.Units.Add(a);
+					air.AddUnit(a);
 					WhichSquad[a] = air;
+				}
+				else if (Info.UnitsCommonNames.Ships.Contains(a.Info.Name))
+				{
+					var ships = GetSquadOfType(SquadType.Ships);
+					if (ships == null)
+						ships = RegisterNewSquad(SquadType.Ships);
+
+					ships.AddUnit(a);
+					WhichSquad[a] = ships;
+				}
+				else if (Info.NNPlacement)
+				{
+					CPos? goodPos = FindGoodPosition(a, Player);
+					if (goodPos != null)
+						QueueOrder(new Order("AttackMove", a, false) { TargetLocation = goodPos.Value });
 				}
 
 				activeUnits.Add(a);
@@ -1009,11 +1105,16 @@ namespace OpenRA.Mods.Common.AI
 				var attackForce = RegisterNewSquad(SquadType.Assault);
 
 				foreach (var a in unitsHangingAroundTheBase)
-					if (!a.Info.HasTraitInfo<AircraftInfo>())
-					{
-						attackForce.Units.Add(a);
-						WhichSquad[a] = attackForce;
-					}
+				{
+					if (a.Info.HasTraitInfo<AircraftInfo>())
+						continue;
+					if (Info.UnitsCommonNames.Ships.Contains(a.Info.Name))
+						continue;
+					if (Info.UnitsCommonNames.ExcludeFromAttackSquads.Contains(a.Info.Name))
+						continue;
+					attackForce.AddUnit(a);
+					WhichSquad[a] = attackForce;
+				}
 
 				unitsHangingAroundTheBase.Clear();
 			}
@@ -1029,7 +1130,9 @@ namespace OpenRA.Mods.Common.AI
 			var allEnemyBaseBuilder = FindEnemyConstructionYards();
 			var ownUnits = activeUnits
 				.Where(unit => unit.IsIdle && unit.Info.HasTraitInfo<AttackBaseInfo>()
-					&& !unit.Info.HasTraitInfo<AircraftInfo>() && !unit.Info.HasTraitInfo<HarvesterInfo>()).ToList();
+					&& !unit.Info.HasTraitInfo<AircraftInfo>()
+					&& !Info.UnitsCommonNames.Ships.Contains(unit.Info.Name)
+					&& !unit.Info.HasTraitInfo<HarvesterInfo>()).ToList();
 
 			if (!allEnemyBaseBuilder.Any() || (ownUnits.Count < Info.SquadSize))
 				return;
@@ -1050,7 +1153,7 @@ namespace OpenRA.Mods.Common.AI
 
 					foreach (var a3 in ownUnits)
 					{
-						rush.Units.Add(a3);
+						rush.AddUnit(a3);
 						WhichSquad[a3] = rush;
 					}
 
@@ -1130,6 +1233,105 @@ namespace OpenRA.Mods.Common.AI
 				BotDebug("AI: Can't find BaseBuildUnit.");
 		}
 
+		void SuicideDemoUnits(Actor self)
+		{
+			var demos = self.World.Actors.Where(a => a.Owner == Player &&
+				Info.UnitsCommonNames.DemoUnits.Contains(a.Info.Name));
+
+			foreach (var demo in demos)
+			{
+				if (!demo.IsIdle)
+					continue;
+
+				// Prevent this from groupping with other guys
+				if (unitsHangingAroundTheBase.Contains(demo))
+					unitsHangingAroundTheBase.Remove(demo);
+
+				// Build near the closest enemy structure
+				Actor closestEnemy = null;
+				var enemyStructures = World.ActorsHavingTrait<Building>().Where(a => !a.Disposed && IsOwnedByEnemy(a));
+				var defenses = enemyStructures.Where(b => b.TraitsImplementing<AttackBase>().Count() > 0);
+				if (defenses.Count() > 0)
+					closestEnemy = defenses.ClosestTo(World.Map.CenterOfCell(defenseCenter));
+				else
+					closestEnemy = enemyStructures.ClosestTo(World.Map.CenterOfCell(defenseCenter));
+
+				// Just move. Don't blow up in my base!
+				QueueOrder(new Order("Move", demo, false) { TargetLocation = closestEnemy.Location });
+				if (demo.TraitOrDefault<AttackSuicides>() != null)
+					QueueOrder(new Order("DetonateAttack", demo, false) { TargetActor = closestEnemy });
+				else
+					QueueOrder(new Order("AttackMove", demo, true) { TargetLocation = closestEnemy.Location });
+			}
+		}
+
+		CPos? FindExpansionLocation(Actor mcv, string factType)
+		{
+			var mines = World.Actors.Where(a => Info.UnitsCommonNames.ResourceSpawner.Contains(a.Info.Name));
+			if (mines.Count() == 0)
+				return null;
+
+			var bases = World.Actors.Where(a => Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
+			var myBases = bases.Where(a => a.Owner == Player);
+			var radius2 = Info.MaxBaseRadius * Info.MaxBaseRadius;
+
+			// Maybe I have no base!
+			if (myBases.Count() == 0)
+			{
+				var bi2 = Map.Rules.Actors[factType].TraitInfoOrDefault<BuildingInfo>();
+				return FindPos(mcv.Location, mcv.Location, Info.MinBaseRadius, 10, factType, bi2, false);
+			}
+
+			// List should be faster than any other complex datastructures, in most maps.
+			List<Actor> coveredMines = new List<Actor>();
+			foreach (var m in mines)
+				foreach (var b in bases)
+				{
+					var dist = (m.Location - b.Location).LengthSquared;
+					if (dist <= radius2)
+						coveredMines.Add(m);
+				}
+
+			// Get uncovered mines
+			List<Actor> uncoveredMines = new List<Actor>();
+			foreach (var m in mines)
+				if (!coveredMines.Contains(m))
+					uncoveredMines.Add(m);
+
+			if (uncoveredMines.Count() == 0)
+				return null; // All covered :(
+
+			// Find a closest uncovered mine.
+			Actor bestMine = null;
+			int bestDistance = 0;
+			foreach (var m in uncoveredMines)
+			{
+				var cy = myBases.ClosestTo(m);
+				var dist = (m.Location - cy.Location).LengthSquared;
+				if (bestMine == null || dist < bestDistance)
+				{
+					bestMine = m;
+					bestDistance = dist;
+				}
+			}
+
+			// With a good mine point, find a deployabe location.
+			var bi = Map.Rules.Actors[factType].TraitInfoOrDefault<BuildingInfo>();
+
+			// Max radius is too big. Starting from small radius
+			var pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, 10, factType, bi, false);
+			if (pos == null)
+				pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, 15, factType, bi, false);
+			if (pos == null)
+				pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, Info.MaxBaseRadius, factType, bi, false);
+			if (pos == null)
+				return null;
+
+			defenseCenter = pos.Value;
+			ProtectOwn(null);
+			return pos;
+		}
+
 		// Find any newly constructed MCVs and deploy them at a sensible
 		// backup location.
 		void FindAndDeployBackupMcv(Actor self)
@@ -1147,7 +1349,9 @@ namespace OpenRA.Mods.Common.AI
 					Info.RestrictMCVDeploymentFallbackToBase &&
 					CountBuildingByCommonName(Info.BuildingCommonNames.ConstructionYard, Player) > 0;
 				var factType = mcv.Info.TraitInfo<TransformsInfo>().IntoActor;
-				var desiredLocation = ChooseBuildLocation(factType, restrictToBase, BuildingPlacementType.Building);
+				var desiredLocation = FindExpansionLocation(mcv, factType);
+				if (desiredLocation == null)
+					desiredLocation = ChooseBuildLocation(factType, restrictToBase, BuildingPlacementType.Building);
 				if (desiredLocation == null)
 					continue;
 
@@ -1303,8 +1507,8 @@ namespace OpenRA.Mods.Common.AI
 
 			foreach (var q in Info.UnitQueues)
 			{
-				if (Info.PipeExternalQuery)
-					QueryPipe(q, unitsHangingAroundTheBase);
+				if (Info.NNProduction)
+					QueryPipe(q);
 				else
 					BuildUnit(q, unitsHangingAroundTheBase.Count < Info.IdleBaseUnitsMaximum);
 			}
@@ -1333,6 +1537,23 @@ namespace OpenRA.Mods.Common.AI
 				Info.UnitLimits.ContainsKey(name) &&
 				World.Actors.Count(a => a.Owner == Player && a.Info.Name == name) >= Info.UnitLimits[name])
 				return;
+
+			string msg = "BASE_AI_UNIT_LOG";
+			msg += " " + Player.InternalName;
+			msg += " " + name;
+
+			var mine = World.Actors.Where(a => a.Owner == Player);
+			msg += " " + mine.Count().ToString();
+			foreach (var u in mine)
+				msg += " " + u.Info.Name;
+
+			// The remaining are enemy + some useful neutral buildings
+			foreach (var u in World.Actors.Where(IsEnemyUnit))
+				msg += " " + u.Info.Name;
+			// Capturable stuff
+			foreach (var u in World.Actors.Where(a => Info.CapturableActorTypes.Contains(a.Info.Name)))
+				msg += " " + u.Info.Name;
+			Send(msg);
 
 			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
 		}
@@ -1380,7 +1601,7 @@ namespace OpenRA.Mods.Common.AI
 				defenseCenter = e.Attacker.Location;
 				ProtectOwn(e.Attacker);
 			}
-			else if (self.TraitOrDefault<Aircraft>() != null)
+			else
 			{
 				if (e.Damage.Value == 0)
 					return;
@@ -1393,11 +1614,15 @@ namespace OpenRA.Mods.Common.AI
 				if (self.TraitOrDefault<Selectable>() == null)
 					return;
 
-				// Aircraft micro control
+				// Aircraft micro/ ground retaliation control
 				if (WhichSquad.ContainsKey(self))
 				{
-					WhichSquad[self].Damage(e); // Reflex avoidance
-					WhichSquad[self].Update(); // Determine flee or not
+					// Determine flee or not. Fast reflex is essential for fragile aircrafts.
+					if (self.Info.HasTraitInfo<AircraftInfo>())
+					{
+						WhichSquad[self].Update();
+						WhichSquad[self].Damage(e);
+					}
 				}
 			}
 		}
@@ -1408,40 +1633,248 @@ namespace OpenRA.Mods.Common.AI
 			client.Send(sendBytes, sendBytes.Length);
 		}
 
-		void QueryPipe(string category, IEnumerable<Actor> unit)
+		public void QueryPipe(string category)
 		{
 			// Pick a free queue
 			var queue = FindQueues(category).FirstOrDefault(q => q.CurrentItem() == null);
 			if (queue == null)
 				return;
 
-			var buildableThings = queue.BuildableItems();
+			var tmp = queue.BuildableItems();
+			if (!tmp.Any())
+				return;
+			var buildableThings = new List<ActorInfo>();
+			foreach (var b in tmp)
+			{
+				if (Info.UnitLimits != null &&
+					Info.UnitLimits.ContainsKey(b.Name) &&
+					World.Actors.Count(a => a.Owner == Player && a.Info.Name == b.Name) >= Info.UnitLimits[b.Name])
+					continue;
+
+				buildableThings.Add(b);
+			}
 			if (!buildableThings.Any())
 				return;
 
-			Send("UNIT_QUERY");
-			Send(Player.InternalName);
+			string msg = "UNIT_QUERY";
+			msg += " " + Player.InternalName;
 
-			Send(buildableThings.Count().ToString());
+			msg += " " + buildableThings.Count().ToString();
 			foreach (var b in buildableThings)
-				Send(b.Name);
+				msg += " " + b.Name;
 
 			var mine = World.Actors.Where(a => a.Owner == Player);
-			Send(mine.Count().ToString());
+			msg += " " + mine.Count().ToString();
 			foreach (var u in mine)
-				Send(u.Info.Name);
+				msg += " " + u.Info.Name;
 
-			// The remaining are enemy units
-			foreach (var u in World.Actors.Where(isEnemyUnit))
-				Send(u.Info.Name);
-			Send("END");
+			// The remaining are enemy + some useful neutral buildings
+			foreach (var u in World.Actors.Where(IsEnemyUnit))
+				msg += " " + u.Info.Name;
+			// Capturable stuff
+			foreach (var u in World.Actors.Where(a => Info.CapturableActorTypes.Contains(a.Info.Name)))
+				msg += " " + u.Info.Name;
+			Send(msg);
 
 			// Get incoming result
 			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
 			var recv = client.Receive(ref remoteIpEndPoint);
 			string name = Encoding.UTF8.GetString(recv);
 
+			// Build nothing, on purpose.
+			if (name == "NULL")
+				return;
 			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
+		}
+
+		Dictionary<Player, int> latestGPComputed = new Dictionary<Player, int>();
+		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
+		CPos? FindGoodPosition(Actor actor, Player requester)
+		{
+			// We are under attack and we should handle that, not move to optimal defense position.
+			var enemy = FindClosestEnemy(actor.CenterPosition, WDist.FromCells(Info.MaxBaseRadius));
+			if (enemy != null)
+				return null;
+
+			if (latestGPComputed.ContainsKey(requester) && (World.WorldTick - latestGPComputed[requester]) < 75)
+			{
+				if (lastGoodPosition.ContainsKey(requester))
+					return lastGoodPosition[requester];
+				else
+					return null;
+			}
+
+			int SZ = 32;
+			int HSZ = 16;
+			int NCH = 6;
+
+			//if (!Info.NNProduction)
+			//	return null;
+
+			Mobile mobile = actor.TraitOrDefault<Mobile>();
+			if (mobile == null)
+				return null;
+
+			// channel order: (production buildings, defenses, buildings) x 2, (units, harvs) x 2
+			// x2 for mine and non-mine.
+			// production: 0
+			// defense: 1
+			// other building: 2
+			// units: 3
+			// terrain: 4
+			int[,,] minimap = new int[SZ, SZ, NCH];
+
+			var c1 = new CPos(actor.Location.X - HSZ, actor.Location.Y - HSZ);
+			var c2 = new CPos(c1.X + SZ - 1, c1.Y + SZ - 1);
+			var p1 = Map.CenterOfCell(c1);
+			var p2 = Map.CenterOfCell(c2);
+			var stuff = World.ActorMap.ActorsInBox(p1, p2);
+
+			foreach (var a in stuff)
+			{
+				// neutral buildings appear as impassable region, so it's fine to not consider it.
+				if (a.Owner != Player)
+					continue;
+
+				int2 uv = new int2(a.Location.X - c1.X, a.Location.Y - c1.Y);
+				if (uv.X >= SZ || uv.Y >= SZ)
+					continue;
+				else if (uv.X < 0 || uv.Y < 0)
+					continue;
+
+				// production
+				if (Info.BuildingCommonNames.Barracks.Contains(a.Info.Name) ||
+					Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name) ||
+					Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name) ||
+					Info.BuildingCommonNames.VehiclesFactory.Contains(a.Info.Name))
+				{
+					minimap[uv.Y, uv.X, 0] += 1;
+				}
+				// defense
+				else if (Info.BuildingCommonNames.StaticAntiAir.Contains(a.Info.Name) ||
+					Info.BuildingCommonNames.Defense.Contains(a.Info.Name))
+				{
+					minimap[uv.Y, uv.X, 1] += 1;
+				}
+				else if (a.TraitOrDefault<Building>() != null)
+				{
+					minimap[uv.Y, uv.X, 2] += 1;
+				}
+				else if (a.Info.TraitInfoOrDefault<AircraftInfo>() == null)
+				{
+					// Aircrafts aren't reliable so let's ignore it.
+					minimap[uv.Y, uv.X, 3] += 1;
+				}
+			}
+
+			// Can be computed once per map? But then navy units have a different view haha.
+			// I can optimize later.
+			// 1:1 map
+			for (int u = 0; u < SZ; u++)
+				for (int v = 0; v < SZ; v++)
+				{
+					var pos = new CPos(c1.X + v, c1.Y + u);
+					if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
+						minimap[u, v, 4] += 1;
+				}
+
+			// 2:1 map
+			for (int u = 0; u < SZ; u++)
+				for (int v = 0; v < SZ; v++)
+				{
+					var sub1 = new CPos(c1.X - HSZ + 2 * v,     c1.Y - HSZ + 2 * u);
+					var sub2 = new CPos(c1.X - HSZ + 2 * v + 1, c1.Y - HSZ + 2 * u);
+					var sub3 = new CPos(c1.X - HSZ + 2 * v,     c1.Y - HSZ + 2 * u + 1);
+					var sub4 = new CPos(c1.X - HSZ + 2 * v + 1, c1.Y - HSZ + 2 * u + 1);
+
+					if (World.Map.Contains(sub1) && mobile.CanEnterCell(sub1))
+						minimap[u, v, NCH - 1] += 1;
+					if (World.Map.Contains(sub2)  && mobile.CanEnterCell(sub2))
+						minimap[u, v, NCH - 1] += 1;
+					if (World.Map.Contains(sub3)  && mobile.CanEnterCell(sub3))
+						minimap[u, v, NCH - 1] += 1;
+					if (World.Map.Contains(sub4)  && mobile.CanEnterCell(sub4))
+						minimap[u, v, NCH - 1] += 1;
+				}
+
+			// minimap to send, into sparse number list.
+			// Too big so converting to bytes.
+			List<int> vals = new List<int>();
+			for (int i = 0; i < SZ; i++)
+				for (int j = 0; j < SZ; j++)
+					for (int k = 0; k < NCH; k++)
+					{
+						var val = minimap[i, j, k];
+						if (val == 0)
+							continue;
+						vals.Add(i);
+						vals.Add(j);
+						vals.Add(k);
+						vals.Add(val);
+					}
+			var rawData = new byte[vals.Count()];
+			for (int i = 0; i < vals.Count(); i++)
+				rawData[i] = (byte) vals[i];
+
+			// Compute direction to enemy base vector
+			Actor enemyBase = null;
+			var enemyBaseBuilder = FindEnemyConstructionYards();
+			if (enemyBaseBuilder.Any())
+				enemyBase = enemyBaseBuilder.ClosestTo(actor);
+			if (enemyBase == null)
+			{
+				var buildings = World.ActorsHavingTrait<Building>().Where(IsEnemyUnit);
+				if (!buildings.Any())
+					return null; // We should have already won.
+				enemyBase = buildings.ClosestTo(actor);
+			}
+			var directionToEnemy = enemyBase.Location - actor.Location;
+			directionToEnemy = 16 * directionToEnemy / directionToEnemy.Length;
+
+			//int2 selfLocation = cpos2uv(location);
+			string msg = "GOOD_POS_QUERY";
+			msg += " " + Player.InternalName;
+			msg += " " + directionToEnemy.X;
+			msg += " " + directionToEnemy.Y;
+			msg += " " + vals.Count();
+			Send(msg);
+			client.Send(rawData, rawData.Length);
+
+			// Get incoming result
+			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
+			client.Client.ReceiveTimeout = 2500;
+			int index = -1;
+			try
+			{
+				var recv = client.Receive(ref remoteIpEndPoint);
+				index = recv.Count() > 0 ? Int32.Parse(Encoding.UTF8.GetString(recv)) : -1;
+			}
+			catch
+			{
+				// do nothing.
+			}
+
+			latestGPComputed[requester] = World.WorldTick;
+
+			if (index == -1)
+			{
+				lastGoodPosition[requester] = null;
+				return null;
+			}
+
+			// index is in range of [0, (SZ * SZ -1)], representing rush cell choice.
+			/*
+			int x_sz = World.Map.Bounds.Width / SZ;
+			int y_sz = World.Map.Bounds.Width / SZ;
+			int wx = X * x_sz + x_sz / 2 + World.Map.Bounds.Left;
+			int wy = Y * y_sz + y_sz / 2 + World.Map.Bounds.Top;
+			*/
+			int Y = index / SZ;
+			int X = index % SZ;
+			var newPos = new CPos(c1.X + X, c1.Y + Y);
+
+			lastGoodPosition[requester] = newPos;
+			return newPos;
 		}
 	}
 }

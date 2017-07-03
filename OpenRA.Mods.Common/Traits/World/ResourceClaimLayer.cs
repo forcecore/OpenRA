@@ -64,9 +64,13 @@ namespace OpenRA.Mods.Common.Traits
 				// Same claimer:
 				if (claim.Claimer == claimer) return true;
 
-				// This is to prevent in-fighting amongst friendly harvesters:
-				if (claimer.Owner == claim.Claimer.Owner) return false;
-				if (claimer.Owner.Stances[claim.Claimer.Owner] == Stance.Ally) return false;
+				// The dead can't claim.
+				if (!claimer.IsDead && !claimer.Disposed)
+				{
+					// This is to prevent in-fighting amongst friendly harvesters:
+					if (claimer.Owner == claim.Claimer.Owner) return false;
+					if (claimer.Owner.Stances[claim.Claimer.Owner] == Stance.Ally) return false;
+				}
 
 				// If an enemy/neutral claimed this, don't respect that claim:
 			}

@@ -118,16 +118,10 @@ namespace OpenRA.Graphics
 			return renderables;
 		}
 
-		int frameDrop;
 		public void Draw()
 		{
 			if (World.WorldActor.Disposed)
 				return;
-
-			if (frameDrop++ < 10)
-				return;
-			else
-				frameDrop = 0;
 
 			if (devTrait.Value != null)
 			{

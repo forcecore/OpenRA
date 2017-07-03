@@ -120,7 +120,7 @@ namespace OpenRA.Mods.Common.AI
 			if (leader == null)
 				return;
 			var ownUnits = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(owner.Units.Count) / 3)
-				.Where(a => a.Owner == owner.Units.FirstOrDefault().Owner && owner.Units.Contains(a)).ToHashSet();
+				.Where(a => a.Owner == leader.Owner && owner.Units.Contains(a)).ToHashSet();
 			if (ownUnits.Count < owner.Units.Count)
 			{
 				owner.Bot.QueueOrder(new Order("Stop", leader, false));
@@ -180,9 +180,10 @@ namespace OpenRA.Mods.Common.AI
 				}
 			}
 
+			var targetActor = owner.Bot.FindClosestEnemy(owner.Units.First().CenterPosition);
 			foreach (var a in owner.Units)
 				if (!BusyAttack(a))
-					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = owner.Bot.FindClosestEnemy(a.CenterPosition) });
+					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = targetActor });
 
 			// Wiped out
 			//if (!owner.IsValid)

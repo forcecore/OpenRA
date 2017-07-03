@@ -308,11 +308,17 @@ namespace OpenRA.Mods.Common.AI
 		public void Activate(Squad owner)
 		{
 			escapeDest = RandomBuildingLocation(owner);
-			safePoint = CalcSafePoint(owner, escapeDest, EnemyStaticAAs(owner));
+			if (!owner.IsValid)
+				safePoint = CPos.Zero;
+			else
+				safePoint = CalcSafePoint(owner, escapeDest, EnemyStaticAAs(owner));
 		}
 
 		public static CPos CalcSafePoint(Squad owner, CPos dest, IEnumerable<Actor> enemyStaticAAs)
 		{
+			if (!owner.IsValid)
+				return CPos.Zero;
+
 			if (!owner.World.Map.Contains(owner.CenterLocation))
 				return RandomBuildingLocation(owner);
 
@@ -374,6 +380,9 @@ namespace OpenRA.Mods.Common.AI
 
 			foreach (var a in owner.Units)
 			{
+				if (a.IsDead || a.Disposed)
+					continue;
+
 				if (!ReloadsAutomatically(a) && !FullAmmo(a))
 				{
 					if (IsRearm(a))

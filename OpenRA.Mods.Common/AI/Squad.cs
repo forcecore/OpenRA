@@ -18,7 +18,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.AI
 {
-	public enum SquadType { Assault, Air, Rush, Protection }
+	public enum SquadType { Assault, Air, Rush, Protection, Ships }
 
 	public class Squad
 	{
@@ -47,6 +47,7 @@ namespace OpenRA.Mods.Common.AI
 			{
 				case SquadType.Assault:
 				case SquadType.Rush:
+				case SquadType.Ships:
 					FuzzyStateMachine.ChangeState(this, new GroundUnitsIdleState(), true);
 					break;
 				case SquadType.Air:
@@ -86,6 +87,11 @@ namespace OpenRA.Mods.Common.AI
 
 		public CPos CenterLocation { get { return World.Map.CellContaining(CenterPosition); } }
 
+		public void AddUnit(Actor unit)
+		{
+			Units.Add(unit);
+		}
+
 		void ReflexAvoidance(Actor attacker)
 		{
 			// Like when you retract your finger when it touches hot stuff,
@@ -100,8 +106,9 @@ namespace OpenRA.Mods.Common.AI
 
 		internal void Damage(AttackInfo e)
 		{
-			// Friendly fire damage can happen, as weapons have spread damage.a
-			if (e.Attacker.AppearsFriendlyTo(Bot.Player.PlayerActor))
+			// Friendly fire damage can happen, as weapons have spread damage.
+			// Here we don't use AppearsFriendlyTo, to kill the disguised enemy.
+			if (Bot.Player.IsAlliedWith(e.Attacker.Owner))
 				return;
 
 			if (Type == SquadType.Air)
@@ -117,6 +124,19 @@ namespace OpenRA.Mods.Common.AI
 				// Flee
 				ReflexAvoidance(e.Attacker);
 				FuzzyStateMachine.ChangeState(this, new AirFleeState(), true);
+			}
+			else if (Type == SquadType.Assault || Type == SquadType.Rush)
+			{
+				// Return fire, if tue current target actor is a non-attacker.
+				if (IsTargetValid && TargetActor.TraitsImplementing<AttackBase>().Count() == 0)
+				{
+					foreach (var a in Units)
+					{
+						TargetActor = e.Attacker;
+						a.CancelActivity();
+						Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = e.Attacker });
+					}
+				}
 			}
 		}
 	}
