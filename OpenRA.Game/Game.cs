@@ -213,6 +213,8 @@ namespace OpenRA
 			var replay = OrderManager.Connection as ReplayConnection;
 			var replayName = replay != null ? replay.Filename : null;
 			var lobbyInfo = OrderManager.LobbyInfo;
+
+			// And, about AI settings. UnitOrders.cs:201.
 			var orders = new[] {
 					Order.Command("sync_lobby {0}".F(lobbyInfo.Serialize())),
 					Order.Command("startgame")
@@ -222,10 +224,32 @@ namespace OpenRA
 			{
 				var map = maps.Random(worldRenderer.World.SharedRandom);
 				lobbyInfo.GlobalSettings.Map = map;
+
+				var bots = new string[] { "Unleashed AI", "Baseline AI", "Rush AI" };
+				var bot = bots.Random(worldRenderer.World.SharedRandom);
+
+				lobbyInfo.Clients[1].Bot = bot;
+				lobbyInfo.Clients[1].Name = bot;
+
+				/*
+				var aiTypes = new string[] {
+					// baseline
+					"Client@0:	Index: 0    PreferredColor: F70606 Color: FFFFFF Faction: Random SpawnPoint: 0   Name: Boolbada IpAddress: 127.0.0.1    State: NotReady Team: 0 Slot: Bot: BotControllerClientIndex: 0 IsAdmin: TrueClient@1:	Index: 1    PreferredColor: A8641B Color: A8641B Faction: allies SpawnPoint: 0   Name: Baseline AI   IpAddress: State: NotReady Team: 0 Slot: Multi1 Bot: Baseline AI    BotControllerClientIndex: 0 IsAdmin: FalseClient@2:	Index: 2    PreferredColor: 052438  Color: F70606 Faction: allies SpawnPoint: 0   Name: Unleashed AI  IpAddress: State: NotReady Team: 0 Slot: Multi0 Bot: Unleashed AI   BotControllerClientIndex: 0 IsAdmin: False",
+					// unleashed
+					"Client@0:	Index: 0	PreferredColor: F70606	Color: FFFFFF	Faction: Random	SpawnPoint: 0	Name: Boolbada	IpAddress: 127.0.0.1	State: NotReady	Team: 0	Slot:	Bot:	BotControllerClientIndex: 0	IsAdmin: TrueClient@1:	Index: 1	PreferredColor: A8641B	Color: A8641B	Faction: allies	SpawnPoint: 0	Name: Unleashed AI	IpAddress:	State: NotReady	Team: 0	Slot: Multi1	Bot: Unleashed AI	BotControllerClientIndex: 0	IsAdmin: FalseClient@2:	Index: 2	PreferredColor: 052438	Color: F70606	Faction: allies	SpawnPoint: 0	Name: Unleashed AI	IpAddress:	State: NotReady	Team: 0	Slot: Multi0	Bot: Unleashed AI	BotControllerClientIndex: 0	IsAdmin: False",
+					//rush
+					"Client@0:	Index: 0    PreferredColor: F70606 Color: FFFFFF Faction: Random SpawnPoint: 0   Name: Boolbada IpAddress: 127.0.0.1    State: NotReady Team: 0 Slot: Bot: BotControllerClientIndex: 0 IsAdmin: TrueClient@1:	Index: 1    PreferredColor: A8641B Color: A8641B Faction: allies SpawnPoint: 0   Name: Rush AI   IpAddress: State: NotReady Team: 0 Slot: Multi1 Bot: Rush AI    BotControllerClientIndex: 0 IsAdmin: FalseClient@2:	Index: 2    PreferredColor: 052438  Color: F70606 Faction: allies SpawnPoint: 0   Name: Unleashed AI  IpAddress: State: NotReady Team: 0 Slot: Multi0 Bot: Unleashed AI   BotControllerClientIndex: 0 IsAdmin: False"
+				};
+				var aiType = aiTypes.Random(worldRenderer.World.SharedRandom);
+				*/
+
+				// Since you're developing the AI on a local computer (no VS) you don't need this sync.
+				// The above lobbyInfo.Clients and lobbyInfo.GlobalSettings.Map are more important.
 				orders = new[] {
-						Order.Command("map {0}".F(map)),
-						Order.Command("sync_lobby {0}".F(lobbyInfo.Serialize())),
-						Order.Command("startgame")
+					//Order.Command("SyncLobbyClients {0}".F(aiType)),
+					//Order.Command("map {0}".F(map)),
+					Order.Command("sync_lobby {0}".F(lobbyInfo.Serialize())),
+					Order.Command("startgame")
 				};
 			}
 
