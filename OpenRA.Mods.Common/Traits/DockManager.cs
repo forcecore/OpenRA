@@ -215,6 +215,7 @@ namespace OpenRA.Mods.Common.Traits
 		void RemoveDeadLock(List<Actor> queue)
 		{
 			bool locked = false;
+			var occupiers = new List<Actor>();
 
 			foreach (var d in allDocks)
 			{
@@ -232,7 +233,7 @@ namespace OpenRA.Mods.Common.Traits
 						mobile.Nudge(a, host, true);
 						continue;
 					}
-					else if (dc == null) // do nothing, probably aircraft or something.
+					else if (dc == null) // do nothing, probably non-reloading aircraft or something.
 						continue;
 
 					if (dc.CurrentDock != null && dc.WaitedLong(info.DeadlockDetectionPeriod))
@@ -246,11 +247,16 @@ namespace OpenRA.Mods.Common.Traits
 
 		void ResetDocks()
 		{
-			var clients = queue.ToArray();
+			// Expensive, but a sure solution where all locked guys get rescued.
+			// We don't get deadlocks very often so, let's be sure to remove then when they occur.
+			var clients = host.World.ActorsHavingTrait<DockClient>().Where(a => a.Trait<DockClient>().Host == host);
 			queue.Clear();
 
 			foreach (var a in clients)
 			{
+				if (a.IsDead || a.Disposed)
+					continue;
+
 				var dc = a.Trait<DockClient>();
 				a.CancelActivity();
 				dc.Release(dc.CurrentDock);
@@ -301,7 +307,7 @@ namespace OpenRA.Mods.Common.Traits
             */
 
 			dockClient.Release(currentDock);
-			dockClient.Acquire(serviceDock, DockState.ServiceAssigned);
+			dockClient.Acquire(host, serviceDock, DockState.ServiceAssigned);
 
 			head.QueueActivity(dockClient.Requester.ApproachDockActivities(host, head, serviceDock));
 			head.QueueActivity(new CallFunc(() => OnDock(head, serviceDock)));
@@ -351,7 +357,7 @@ namespace OpenRA.Mods.Common.Traits
 			// The last one is shared anyway. The vacancy info is not very meaningful there.
 			if (dockClient.CurrentDock != null)
 				dockClient.Release(dockClient.CurrentDock);
-			dockClient.Acquire(dock, DockState.WaitAssigned);
+			dockClient.Acquire(host, dock, DockState.WaitAssigned);
 
 			// Move to the waiting dock and wait for service dock to be released.
 			client.QueueActivity(client.Trait<Mobile>().MoveTo(dock.Location, 2));

@@ -39,11 +39,15 @@ namespace OpenRA.Mods.Common.Traits
 	{
 		// readonly DockClientInfo info;
 		readonly Actor self;
+		Actor host;
+
 		public Dock CurrentDock;
 		public DockState DockState = DockState.NotAssigned;
 		public IDockActivity Requester; // The activity that requested dock.
 
 		int acquireTimeStamp = -1;
+
+		public Actor Host { get { return host; } }
 
 		public DockClient(ActorInitializer init, DockClientInfo info)
 		{
@@ -51,7 +55,7 @@ namespace OpenRA.Mods.Common.Traits
 			self = init.Self;
 		}
 
-		public void Acquire(Dock dock, DockState dockState)
+		public void Acquire(Actor host, Dock dock, DockState dockState)
 		{
 			// You are to acquire only when you don't have one.
 			// i.e., release first.
@@ -61,6 +65,7 @@ namespace OpenRA.Mods.Common.Traits
 			dock.Reserver = self;
 			CurrentDock = dock;
 			DockState = dockState;
+			this.host = host;
 
 			acquireTimeStamp = self.World.WorldTick;
 		}
@@ -74,6 +79,7 @@ namespace OpenRA.Mods.Common.Traits
 			CurrentDock = null;
 			DockState = DockState.NotAssigned;
 			acquireTimeStamp = -1;
+			host = null;
 
 			if (dock != null)
 				dock.Reserver = null;
