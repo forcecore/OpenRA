@@ -37,6 +37,27 @@ namespace OpenRA.Mods.Common.AI
 			owner.Bot.Send(stats2.DeathsCost.ToString());
 			owner.Bot.Send("END");
 		}
+
+		protected Actor FindClosestEnemy(Squad owner)
+		{
+			if (!owner.IsValid)
+				return null;
+
+			if (owner.Type == SquadType.Ships)
+			{
+				// For ships, cheat and move towards enemy naval production, if any.
+				var t = owner.World.Actors.Where(a
+					=> owner.Bot.Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name)
+					&& a.AppearsHostileTo(owner.Bot.Player.PlayerActor)).FirstOrDefault();
+
+				// If naval yard is too far away, return it.
+				// Else, FindClosest below will find suitable enemy targets :)
+				if (t != null && (t.Location - owner.Units.First().Location).LengthSquared > 20 * 20)
+					return t;
+			}
+
+			return owner.Bot.FindClosestEnemy(owner.Units.FirstOrDefault().CenterPosition);
+		}
 	}
 
 	class GroundUnitsIdleState : GroundStateBase, IState
@@ -50,7 +71,7 @@ namespace OpenRA.Mods.Common.AI
 
 			if (!owner.IsTargetValid)
 			{
-				var t = owner.Bot.FindClosestEnemy(owner.Units.FirstOrDefault().CenterPosition);
+				var t = FindClosestEnemy(owner);
 				if (t == null) return;
 				owner.TargetActor = t;
 			}
@@ -106,9 +127,9 @@ namespace OpenRA.Mods.Common.AI
 
 			if (!owner.IsTargetValid)
 			{
-				var closestEnemy = owner.Bot.FindClosestEnemy(owner.Units.Random(owner.Random).CenterPosition);
-				if (closestEnemy != null)
-					owner.TargetActor = closestEnemy;
+				var t = FindClosestEnemy(owner);
+				if (t != null)
+					owner.TargetActor = t;
 				else
 				{
 					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
@@ -170,9 +191,9 @@ namespace OpenRA.Mods.Common.AI
 
 			if (!owner.IsTargetValid)
 			{
-				var closestEnemy = owner.Bot.FindClosestEnemy(owner.Units.Random(owner.Random).CenterPosition);
-				if (closestEnemy != null)
-					owner.TargetActor = closestEnemy;
+				var t = FindClosestEnemy(owner);
+				if (t != null)
+					owner.TargetActor = t;
 				else
 				{
 					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
@@ -180,6 +201,7 @@ namespace OpenRA.Mods.Common.AI
 				}
 			}
 
+			// Switch target durign fight
 			var targetActor = owner.Bot.FindClosestEnemy(owner.Units.First().CenterPosition);
 			foreach (var a in owner.Units)
 				if (!BusyAttack(a))
