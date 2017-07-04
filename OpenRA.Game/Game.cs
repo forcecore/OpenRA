@@ -225,7 +225,12 @@ namespace OpenRA
 				var map = maps.Random(worldRenderer.World.SharedRandom);
 				lobbyInfo.GlobalSettings.Map = map;
 
-				var bots = new string[] { "Unleashed AI", "Baseline AI", "Rush AI" };
+				// Random doesn't seem very random.
+				var bots = new string[] {
+					"Unleashed AI", "Baseline AI", "Rush AI",
+					"Unleashed AI", "Baseline AI", "Rush AI",
+					"Unleashed AI", "Baseline AI", "Rush AI"
+				};
 				var bot = bots.Random(worldRenderer.World.SharedRandom);
 
 				lobbyInfo.Clients[1].Bot = bot;
