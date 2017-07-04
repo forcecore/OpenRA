@@ -793,24 +793,6 @@ namespace OpenRA.Mods.Common.AI
 				World.IssueOrder(orders.Dequeue());
 		}
 
-		int2 cpos2uv(CPos location)
-		{
-			int SZ = 32;
-			int y = SZ * (location.Y - World.Map.Bounds.Top) / World.Map.Bounds.Height;
-			int x = SZ * (location.X - World.Map.Bounds.Left) / World.Map.Bounds.Width;
-			// Some stuff are actually OUTSIDE the map.
-			if (y < 0)
-				y = 0;
-			if (x < 0)
-				x = 0;
-			if (y > SZ - 1)
-				y = SZ - 1;
-			if (x > SZ - 1)
-				x = SZ - 1;
-
-			return new int2(x, y);
-		}
-
 		internal Actor FindClosestEnemy(WPos pos)
 		{
 			return World.Actors.Where(IsEnemyUnit).ClosestTo(pos);
@@ -1049,9 +1031,13 @@ namespace OpenRA.Mods.Common.AI
 
 		void FindNewUnits(Actor self)
 		{
+			// Be sure to do InWorld check as well, they might be in transport.
 			var newUnits = self.World.ActorsHavingTrait<IPositionable>()
-				.Where(a => a.Owner == Player && !Info.UnitsCommonNames.Mcv.Contains(a.Info.Name) &&
-					!Info.UnitsCommonNames.ExcludeFromSquads.Contains(a.Info.Name) && !activeUnits.Contains(a));
+				.Where(a => a.Owner == Player
+					&& !a.IsDead && !a.Disposed && a.IsInWorld
+					&& !Info.UnitsCommonNames.Mcv.Contains(a.Info.Name)
+					&& !Info.UnitsCommonNames.ExcludeFromSquads.Contains(a.Info.Name)
+					&& !activeUnits.Contains(a));
 
 			foreach (var a in newUnits)
 			{
@@ -1148,8 +1134,12 @@ namespace OpenRA.Mods.Common.AI
 					//// TODO: make on target selected Lua call
 
 					var rush = GetSquadOfType(SquadType.Rush);
-					if (rush == null)
+					if (rush == null || rush.Units.Count() > Info.SquadSize)
+					{
+						// Everybody gets lumped into one huge squad called SquadType.Rush, if we don't split up,
+						// That's why we are examining units.count.
 						rush = RegisterNewSquad(SquadType.Rush, target);
+					}
 
 					foreach (var a3 in ownUnits)
 					{
@@ -1687,15 +1677,23 @@ namespace OpenRA.Mods.Common.AI
 			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
 		}
 
-		Dictionary<Player, int> latestGPComputed = new Dictionary<Player, int>();
-		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
-		CPos? FindGoodPosition(Actor actor, Player requester)
+		// reference: reference point.
+		int2? cpos2uv(CPos location, CPos reference, int sz, int scale)
 		{
-			// We are under attack and we should handle that, not move to optimal defense position.
-			var enemy = FindClosestEnemy(actor.CenterPosition, WDist.FromCells(Info.MaxBaseRadius));
-			if (enemy != null)
+			int x = (location.X - reference.X) / scale;
+			int y = (location.Y - reference.Y) / scale;
+			if (x < 0 || y < 0)
+				return null;
+			if (x >= sz || y >= sz)
 				return null;
 
+			return new int2(x, y);
+		}
+
+		Dictionary<Player, int> latestGPComputed = new Dictionary<Player, int>();
+		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
+		public CPos? FindGoodPosition(Actor actor, Player requester)
+		{
 			if (latestGPComputed.ContainsKey(requester) && (World.WorldTick - latestGPComputed[requester]) < 75)
 			{
 				if (lastGoodPosition.ContainsKey(requester))
@@ -1704,9 +1702,10 @@ namespace OpenRA.Mods.Common.AI
 					return null;
 			}
 
-			int SZ = 32;
-			int HSZ = 16;
-			int NCH = 6;
+			int SZ = 32; // output feature size SZ x SZ
+			int HSZ = 16; // half of the feature size
+			int NCH = 6; // feature channels
+			int SCALE = 2; // Shrink 2x2 to 1x1
 
 			//if (!Info.NNProduction)
 			//	return null;
@@ -1721,55 +1720,59 @@ namespace OpenRA.Mods.Common.AI
 			// defense: 1
 			// other building: 2
 			// units: 3
-			// terrain: 4
+			// enemy pos: 4 (don't care building or not)
+			// terrain: 5
 			int[,,] minimap = new int[SZ, SZ, NCH];
 
-			var c1 = new CPos(actor.Location.X - HSZ, actor.Location.Y - HSZ);
-			var c2 = new CPos(c1.X + SZ - 1, c1.Y + SZ - 1);
+			var c1 = new CPos(actor.Location.X - SCALE * HSZ, actor.Location.Y - SCALE * HSZ);
+			var c2 = new CPos(c1.X + SCALE * SZ - 1, c1.Y + SCALE * SZ - 1);
 			var p1 = Map.CenterOfCell(c1);
 			var p2 = Map.CenterOfCell(c2);
 			var stuff = World.ActorMap.ActorsInBox(p1, p2);
 
 			foreach (var a in stuff)
 			{
-				// neutral buildings appear as impassable region, so it's fine to not consider it.
-				if (a.Owner != Player)
-					continue;
-
-				int2 uv = new int2(a.Location.X - c1.X, a.Location.Y - c1.Y);
-				if (uv.X >= SZ || uv.Y >= SZ)
-					continue;
-				else if (uv.X < 0 || uv.Y < 0)
+				int2? uv = cpos2uv(a.Location, c1, SZ, SCALE);
+				if (uv == null)
 					continue;
 
 				// production
-				if (Info.BuildingCommonNames.Barracks.Contains(a.Info.Name) ||
-					Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name) ||
-					Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name) ||
-					Info.BuildingCommonNames.VehiclesFactory.Contains(a.Info.Name))
+				if (a.Owner == Player)
 				{
-					minimap[uv.Y, uv.X, 0] += 1;
+					if (Info.BuildingCommonNames.Barracks.Contains(a.Info.Name) ||
+						Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name) ||
+						Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name) ||
+						Info.BuildingCommonNames.VehiclesFactory.Contains(a.Info.Name))
+					{
+						minimap[uv.Value.Y, uv.Value.X, 0] += 1;
+					}
+					// defense
+					else if (Info.BuildingCommonNames.StaticAntiAir.Contains(a.Info.Name) ||
+						Info.BuildingCommonNames.Defense.Contains(a.Info.Name))
+					{
+						minimap[uv.Value.Y, uv.Value.X, 1] += 1;
+					}
+					else if (a.TraitOrDefault<Building>() != null)
+					{
+						minimap[uv.Value.Y, uv.Value.X, 2] += 1;
+					}
+					else if (a.Info.TraitInfoOrDefault<AircraftInfo>() == null)
+					{
+						// Aircrafts aren't reliable so let's ignore it.
+						minimap[uv.Value.Y, uv.Value.X, 3] += 1;
+					}
 				}
-				// defense
-				else if (Info.BuildingCommonNames.StaticAntiAir.Contains(a.Info.Name) ||
-					Info.BuildingCommonNames.Defense.Contains(a.Info.Name))
+				//else if (a.AppearsHostileTo(Player.PlayerActor) && a.TraitsImplementing<AttackBase>().Count() > 0)
+				else if (a.AppearsHostileTo(Player.PlayerActor)) // confining to AttackBase makes AI so blind.
 				{
-					minimap[uv.Y, uv.X, 1] += 1;
-				}
-				else if (a.TraitOrDefault<Building>() != null)
-				{
-					minimap[uv.Y, uv.X, 2] += 1;
-				}
-				else if (a.Info.TraitInfoOrDefault<AircraftInfo>() == null)
-				{
-					// Aircrafts aren't reliable so let's ignore it.
-					minimap[uv.Y, uv.X, 3] += 1;
+					minimap[uv.Value.Y, uv.Value.X, 4] += 1;
 				}
 			}
 
 			// Can be computed once per map? But then navy units have a different view haha.
 			// I can optimize later.
 			// 1:1 map
+			/*
 			for (int u = 0; u < SZ; u++)
 				for (int v = 0; v < SZ; v++)
 				{
@@ -1777,24 +1780,16 @@ namespace OpenRA.Mods.Common.AI
 					if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
 						minimap[u, v, 4] += 1;
 				}
+			*/
 
 			// 2:1 map
-			for (int u = 0; u < SZ; u++)
-				for (int v = 0; v < SZ; v++)
+			for (int u = 0; u < SCALE * SZ; u++)
+				for (int v = 0; v < SCALE * SZ; v++)
 				{
-					var sub1 = new CPos(c1.X - HSZ + 2 * v,     c1.Y - HSZ + 2 * u);
-					var sub2 = new CPos(c1.X - HSZ + 2 * v + 1, c1.Y - HSZ + 2 * u);
-					var sub3 = new CPos(c1.X - HSZ + 2 * v,     c1.Y - HSZ + 2 * u + 1);
-					var sub4 = new CPos(c1.X - HSZ + 2 * v + 1, c1.Y - HSZ + 2 * u + 1);
-
-					if (World.Map.Contains(sub1) && mobile.CanEnterCell(sub1))
-						minimap[u, v, NCH - 1] += 1;
-					if (World.Map.Contains(sub2)  && mobile.CanEnterCell(sub2))
-						minimap[u, v, NCH - 1] += 1;
-					if (World.Map.Contains(sub3)  && mobile.CanEnterCell(sub3))
-						minimap[u, v, NCH - 1] += 1;
-					if (World.Map.Contains(sub4)  && mobile.CanEnterCell(sub4))
-						minimap[u, v, NCH - 1] += 1;
+					CPos pos = new CPos(c1.X + v, c1.Y + u);
+					int2? uv = cpos2uv(pos, c1, SZ, SCALE);
+					if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
+						minimap[uv.Value.Y, uv.Value.X, NCH - 1] += 1;
 				}
 
 			// minimap to send, into sparse number list.
@@ -1829,7 +1824,7 @@ namespace OpenRA.Mods.Common.AI
 				enemyBase = buildings.ClosestTo(actor);
 			}
 			var directionToEnemy = enemyBase.Location - actor.Location;
-			directionToEnemy = 16 * directionToEnemy / directionToEnemy.Length;
+			directionToEnemy = 10 * directionToEnemy / directionToEnemy.Length;
 
 			//int2 selfLocation = cpos2uv(location);
 			string msg = "GOOD_POS_QUERY";
@@ -1869,8 +1864,8 @@ namespace OpenRA.Mods.Common.AI
 			int wx = X * x_sz + x_sz / 2 + World.Map.Bounds.Left;
 			int wy = Y * y_sz + y_sz / 2 + World.Map.Bounds.Top;
 			*/
-			int Y = index / SZ;
-			int X = index % SZ;
+			int Y = SCALE * (index / SZ);
+			int X = SCALE * (index % SZ);
 			var newPos = new CPos(c1.X + X, c1.Y + Y);
 
 			lastGoodPosition[requester] = newPos;
