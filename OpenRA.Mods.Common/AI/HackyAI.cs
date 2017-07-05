@@ -1202,10 +1202,10 @@ namespace OpenRA.Mods.Common.AI
 			if (Info.NNRallyPoint && !Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
 			{
 				// ANY unit will do, regardless of owner.
-				var footUnits = World.ActorsHavingTrait<Mobile>().Where(a => !Info.UnitsCommonNames.Ships.Contains(a.Info.Name));
+				var footUnits = World.ActorsWithTrait<Mobile>().Where(pair => !Info.UnitsCommonNames.Ships.Contains(pair.Actor.Info.Name));
 				if (footUnits.Any())
 				{
-					CPos? goodPos = NNFindRallyPointPosition(producer, footUnits.First().Trait<Mobile>(), Player);
+					CPos? goodPos = NNFindRallyPointPosition(producer, footUnits.First().Trait, Player);
 					if (goodPos.HasValue)
 						return goodPos.Value;
 				}
