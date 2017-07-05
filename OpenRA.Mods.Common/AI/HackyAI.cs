@@ -82,7 +82,8 @@ namespace OpenRA.Mods.Common.AI
 
 		[Desc("EXPERIMENTAL")]
 		public readonly bool NNProduction = false;
-		public readonly bool NNPlacement = false;
+		public readonly bool NNRallyPoint = false;
+		public readonly bool NNBuildingPlacer = false;
 
 		[Desc("Minimum number of units AI must have before attacking.")]
 		public readonly int SquadSize = 8;
@@ -1069,12 +1070,6 @@ namespace OpenRA.Mods.Common.AI
 					ships.AddUnit(a);
 					WhichSquad[a] = ships;
 				}
-				else if (Info.NNPlacement)
-				{
-					CPos? goodPos = FindGoodPosition(a, Player);
-					if (goodPos != null)
-						QueueOrder(new Order("AttackMove", a, false) { TargetLocation = goodPos.Value });
-				}
 
 				activeUnits.Add(a);
 			}
@@ -1180,21 +1175,42 @@ namespace OpenRA.Mods.Common.AI
 			return info != null && World.IsCellBuildable(x, info);
 		}
 
+		int rallyPointTicks = 0;
 		void SetRallyPointsForNewProductionBuildings(Actor self)
 		{
+			rallyPointTicks++;
+
 			foreach (var rp in self.World.ActorsWithTrait<RallyPoint>())
-				if (rp.Actor.Owner == Player &&
-					!IsRallyPointValid(rp.Trait.Location, rp.Actor.Info.TraitInfoOrDefault<BuildingInfo>()))
+				if (rp.Actor.Owner == Player
+						&& (!IsRallyPointValid(rp.Trait.Location, rp.Actor.Info.TraitInfoOrDefault<BuildingInfo>())
+							|| rallyPointTicks > 5 * 25)
+					)
+				{
 					QueueOrder(new Order("SetRallyPoint", rp.Actor, false)
 					{
 						TargetLocation = ChooseRallyLocationNear(rp.Actor),
 						SuppressVisualFeedback = true
 					});
+				}
+
+			rallyPointTicks = 0;
 		}
 
 		// Won't work for shipyards...
 		CPos ChooseRallyLocationNear(Actor producer)
 		{
+			if (Info.NNRallyPoint && !Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
+			{
+				// ANY unit will do, regardless of owner.
+				var footUnits = World.ActorsHavingTrait<Mobile>().Where(a => !Info.UnitsCommonNames.Ships.Contains(a.Info.Name));
+				if (footUnits.Any())
+				{
+					CPos? goodPos = NNFindRallyPointPosition(producer, footUnits.First().Trait<Mobile>(), Player);
+					if (goodPos.HasValue)
+						return goodPos.Value;
+				}
+			}
+
 			var possibleRallyPoints = Map.FindTilesInCircle(producer.Location, Info.RallyPointScanRadius)
 				.Where(c => IsRallyPointValid(c, producer.Info.TraitInfoOrDefault<BuildingInfo>()));
 
@@ -1690,9 +1706,14 @@ namespace OpenRA.Mods.Common.AI
 			return new int2(x, y);
 		}
 
+		public string CanonicalAIName(Player p)
+		{
+			return (p.InternalName + p.PlayerName).Replace(" ", "");
+		}
+
 		Dictionary<Player, int> latestGPComputed = new Dictionary<Player, int>();
 		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
-		public CPos? FindGoodPosition(Actor actor, Player requester)
+		public CPos? NNFindRallyPointPosition(Actor actor, Mobile mobile, Player requester)
 		{
 			if (latestGPComputed.ContainsKey(requester) && (World.WorldTick - latestGPComputed[requester]) < 75)
 			{
@@ -1706,13 +1727,6 @@ namespace OpenRA.Mods.Common.AI
 			int HSZ = 16; // half of the feature size
 			int NCH = 6; // feature channels
 			int SCALE = 2; // Shrink 2x2 to 1x1
-
-			//if (!Info.NNProduction)
-			//	return null;
-
-			Mobile mobile = actor.TraitOrDefault<Mobile>();
-			if (mobile == null)
-				return null;
 
 			// channel order: (production buildings, defenses, buildings) x 2, (units, harvs) x 2
 			// x2 for mine and non-mine.
@@ -1828,7 +1842,7 @@ namespace OpenRA.Mods.Common.AI
 
 			//int2 selfLocation = cpos2uv(location);
 			string msg = "GOOD_POS_QUERY";
-			msg += " " + Player.InternalName;
+			msg += " " + CanonicalAIName(Player);
 			msg += " " + directionToEnemy.X;
 			msg += " " + directionToEnemy.Y;
 			msg += " " + vals.Count();
