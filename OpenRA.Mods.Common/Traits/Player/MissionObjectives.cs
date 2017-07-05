@@ -158,7 +158,7 @@ namespace OpenRA.Mods.Common.Traits
 					player.World.PauseStateLocked = true;
 
 					var hackyAI = player.PlayerActor.TraitsImplementing<AI.HackyAI>().Where(b => b.IsEnabled).FirstOrDefault();
-					hackyAI.Send("WIN " + player.InternalName);
+					hackyAI.Send("WIN " + hackyAI.CanonicalAIName(player));
 
 					if (Game.Settings.Debug.AutoRestart)
 						Game.RestartGame();
