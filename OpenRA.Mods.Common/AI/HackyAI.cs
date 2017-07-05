@@ -16,7 +16,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Mods.Common.Traits;
@@ -49,9 +48,8 @@ namespace OpenRA.Mods.Common.AI
 		{
 			public readonly HashSet<string> Mcv = new HashSet<string>();
 			public readonly HashSet<string> Seige = new HashSet<string>();
-			public readonly HashSet<string> ResourceSpawner = new HashSet<string>(); // tiberium tree, ore mine... Used for expansion algorithm.
 			public readonly HashSet<string> DemoUnits = new HashSet<string>(); // these units blow up badly that are unwelcome in base
-			public readonly HashSet<string> Ships = new HashSet<string>();
+			public readonly HashSet<string> NavalUnits = new HashSet<string>();
 			public readonly HashSet<string> ExcludeFromSquads = new HashSet<string>();
 			public readonly HashSet<string> ExcludeFromAttackSquads = new HashSet<string>(); // they can be seen by AI but not belong to attack force (like engis)
 		}
@@ -69,6 +67,9 @@ namespace OpenRA.Mods.Common.AI
 			public readonly HashSet<string> StaticAntiAir = new HashSet<string>();
 			public readonly HashSet<string> Fragile = new HashSet<string>();
 			public readonly HashSet<string> Defense = new HashSet<string>();
+			public readonly HashSet<string> NNTech = new HashSet<string>();
+			public readonly HashSet<string> NNTier3Tech = new HashSet<string>();
+			public readonly HashSet<string> SuperWeapon = new HashSet<string>();
 		}
 
 		[Desc("Ingame name this bot uses.")]
@@ -266,6 +267,7 @@ namespace OpenRA.Mods.Common.AI
 	}
 
 	public enum BuildingPlacementType { Building, Defense, Refinery, Fragile }
+	public enum NNBuildingPlacementType { Production, Defense, AADefense, Refinery, Tech, Tier3Tech, SuperWeapon, Power, Other }
 
 	public sealed class HackyAI : ITick, IBot, INotifyDamage
 	{
@@ -683,6 +685,9 @@ namespace OpenRA.Mods.Common.AI
 		CPos defenseCenter;
 		public CPos? ChooseBuildLocation(string actorType, bool distanceToBaseIsImportant, BuildingPlacementType type)
 		{
+			if (Info.NNBuildingPlacer && !Info.BuildingCommonNames.NavalProduction.Contains(actorType))
+				return NNChooseBuildLocation(actorType);
+
 			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
 			if (bi == null)
 				return null;
@@ -1061,7 +1066,7 @@ namespace OpenRA.Mods.Common.AI
 					air.AddUnit(a);
 					WhichSquad[a] = air;
 				}
-				else if (Info.UnitsCommonNames.Ships.Contains(a.Info.Name))
+				else if (Info.UnitsCommonNames.NavalUnits.Contains(a.Info.Name))
 				{
 					var ships = GetSquadOfType(SquadType.Ships);
 					if (ships == null)
@@ -1089,7 +1094,7 @@ namespace OpenRA.Mods.Common.AI
 				{
 					if (a.Info.HasTraitInfo<AircraftInfo>())
 						continue;
-					if (Info.UnitsCommonNames.Ships.Contains(a.Info.Name))
+					if (Info.UnitsCommonNames.NavalUnits.Contains(a.Info.Name))
 						continue;
 					if (Info.UnitsCommonNames.ExcludeFromAttackSquads.Contains(a.Info.Name))
 						continue;
@@ -1112,7 +1117,7 @@ namespace OpenRA.Mods.Common.AI
 			var ownUnits = activeUnits
 				.Where(unit => unit.IsIdle && unit.Info.HasTraitInfo<AttackBaseInfo>()
 					&& !unit.Info.HasTraitInfo<AircraftInfo>()
-					&& !Info.UnitsCommonNames.Ships.Contains(unit.Info.Name)
+					&& !Info.UnitsCommonNames.NavalUnits.Contains(unit.Info.Name)
 					&& !unit.Info.HasTraitInfo<HarvesterInfo>()).ToList();
 
 			if (!allEnemyBaseBuilder.Any() || (ownUnits.Count < Info.SquadSize))
@@ -1202,7 +1207,7 @@ namespace OpenRA.Mods.Common.AI
 			if (Info.NNRallyPoint && !Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
 			{
 				// ANY unit will do, regardless of owner.
-				var footUnits = World.ActorsWithTrait<Mobile>().Where(pair => !Info.UnitsCommonNames.Ships.Contains(pair.Actor.Info.Name));
+				var footUnits = World.ActorsWithTrait<Mobile>().Where(pair => !Info.UnitsCommonNames.NavalUnits.Contains(pair.Actor.Info.Name));
 				if (footUnits.Any())
 				{
 					CPos? goodPos = NNFindRallyPointPosition(producer, footUnits.First().Trait, Player);
@@ -1273,7 +1278,7 @@ namespace OpenRA.Mods.Common.AI
 
 		CPos? FindExpansionLocation(Actor mcv, string factType)
 		{
-			var mines = World.Actors.Where(a => Info.UnitsCommonNames.ResourceSpawner.Contains(a.Info.Name));
+			var mines = World.ActorsHavingTrait<SeedsResource>();
 			if (mines.Count() == 0)
 				return null;
 
@@ -1300,7 +1305,7 @@ namespace OpenRA.Mods.Common.AI
 
 			// Get uncovered mines
 			List<Actor> uncoveredMines = new List<Actor>();
-			foreach (var m in mines)
+			foreach (var m in World.ActorsHavingTrait<SeedsResource>())
 				if (!coveredMines.Contains(m))
 					uncoveredMines.Add(m);
 
@@ -1711,6 +1716,47 @@ namespace OpenRA.Mods.Common.AI
 			return (p.InternalName + p.PlayerName).Replace(" ", "");
 		}
 
+		// When receiving linearized coordinate from the network, decode it as x, y.
+		// Return null on receive error.
+		int2? ReceiveCoordinate(int sz)
+		{
+			// Get incoming result
+			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
+			client.Client.ReceiveTimeout = 2500;
+			try
+			{
+				var recv = client.Receive(ref remoteIpEndPoint);
+				int index = recv.Count() > 0 ? Int32.Parse(Encoding.UTF8.GetString(recv)) : -1;
+				if (index == -1)
+					return null;
+				int y = index / sz;
+				int x = index % sz;
+				return new int2(x, y);
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		CVec? DirectionToEnemy(CPos from)
+		{
+			// Compute direction to enemy base vector
+			Actor enemyBase = null;
+			var enemyBaseBuilder = FindEnemyConstructionYards();
+			if (enemyBaseBuilder.Any())
+				enemyBase = enemyBaseBuilder.ClosestTo(World.Map.CenterOfCell(from));
+			if (enemyBase == null)
+			{
+				var buildings = World.ActorsHavingTrait<Building>().Where(IsEnemyUnit);
+				if (!buildings.Any())
+					return null; // We should have already won.
+				enemyBase = buildings.ClosestTo(World.Map.CenterOfCell(from));
+			}
+			var directionToEnemy = enemyBase.Location - from;
+			return 10 * directionToEnemy / directionToEnemy.Length;
+		}
+
 		Dictionary<Player, int> latestGPComputed = new Dictionary<Player, int>();
 		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
 		public CPos? NNFindRallyPointPosition(Actor actor, Mobile mobile, Player requester)
@@ -1822,68 +1868,170 @@ namespace OpenRA.Mods.Common.AI
 						vals.Add(val);
 					}
 			var rawData = new byte[vals.Count()];
-			for (int i = 0; i < vals.Count(); i++)
+			for (int i = 0; i < rawData.Length; i++)
 				rawData[i] = (byte) vals[i];
-
-			// Compute direction to enemy base vector
-			Actor enemyBase = null;
-			var enemyBaseBuilder = FindEnemyConstructionYards();
-			if (enemyBaseBuilder.Any())
-				enemyBase = enemyBaseBuilder.ClosestTo(actor);
-			if (enemyBase == null)
-			{
-				var buildings = World.ActorsHavingTrait<Building>().Where(IsEnemyUnit);
-				if (!buildings.Any())
-					return null; // We should have already won.
-				enemyBase = buildings.ClosestTo(actor);
-			}
-			var directionToEnemy = enemyBase.Location - actor.Location;
-			directionToEnemy = 10 * directionToEnemy / directionToEnemy.Length;
+	
+			var directionToEnemy = DirectionToEnemy(actor.Location);
+			if (directionToEnemy == null)
+				return null; // we should have won already.
 
 			//int2 selfLocation = cpos2uv(location);
-			string msg = "GOOD_POS_QUERY";
+			string msg = "RALLY_POINT_QUERY";
 			msg += " " + CanonicalAIName(Player);
-			msg += " " + directionToEnemy.X;
-			msg += " " + directionToEnemy.Y;
+			msg += " " + directionToEnemy.Value.X;
+			msg += " " + directionToEnemy.Value.Y;
 			msg += " " + vals.Count();
 			Send(msg);
 			client.Send(rawData, rawData.Length);
 
-			// Get incoming result
-			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
-			client.Client.ReceiveTimeout = 2500;
-			int index = -1;
-			try
-			{
-				var recv = client.Receive(ref remoteIpEndPoint);
-				index = recv.Count() > 0 ? Int32.Parse(Encoding.UTF8.GetString(recv)) : -1;
-			}
-			catch
-			{
-				// do nothing.
-			}
-
+			var coord = ReceiveCoordinate(SZ);
 			latestGPComputed[requester] = World.WorldTick;
 
-			if (index == -1)
+			if (coord == null)
 			{
 				lastGoodPosition[requester] = null;
 				return null;
 			}
 
-			// index is in range of [0, (SZ * SZ -1)], representing rush cell choice.
-			/*
-			int x_sz = World.Map.Bounds.Width / SZ;
-			int y_sz = World.Map.Bounds.Width / SZ;
-			int wx = X * x_sz + x_sz / 2 + World.Map.Bounds.Left;
-			int wy = Y * y_sz + y_sz / 2 + World.Map.Bounds.Top;
-			*/
-			int Y = SCALE * (index / SZ);
-			int X = SCALE * (index % SZ);
-			var newPos = new CPos(c1.X + X, c1.Y + Y);
-
+			var newPos = new CPos(c1.X + SCALE * coord.Value.X, c1.Y + SCALE * coord.Value.Y);
 			lastGoodPosition[requester] = newPos;
 			return newPos;
+		}
+
+		int NNBuildingTypeToInt(string actorType)
+		{
+			if (Info.BuildingCommonNames.ConstructionYard.Contains(actorType))
+				return (int)NNBuildingPlacementType.Production;
+
+			if (Info.BuildingCommonNames.Barracks.Contains(actorType))
+				return (int)NNBuildingPlacementType.Production;
+
+			if (Info.BuildingCommonNames.VehiclesFactory.Contains(actorType))
+				return (int)NNBuildingPlacementType.Production;
+
+			if (Info.BuildingCommonNames.Defense.Contains(actorType))
+				return (int)NNBuildingPlacementType.Defense;
+
+			if (Info.BuildingCommonNames.StaticAntiAir.Contains(actorType))
+				return (int)NNBuildingPlacementType.AADefense;
+
+			if (Info.BuildingCommonNames.Refinery.Contains(actorType))
+				return (int)NNBuildingPlacementType.Refinery;
+
+			if (Info.BuildingCommonNames.Power.Contains(actorType))
+				return (int)NNBuildingPlacementType.Power;
+
+			if (Info.BuildingCommonNames.NNTech.Contains(actorType))
+				return (int)NNBuildingPlacementType.Tech;
+			
+			if (Info.BuildingCommonNames.NNTier3Tech.Contains(actorType))
+				return (int)NNBuildingPlacementType.Tier3Tech;
+
+			if (Info.BuildingCommonNames.SuperWeapon.Contains(actorType))
+				return (int)NNBuildingPlacementType.SuperWeapon;
+
+			return (int)NNBuildingPlacementType.Other;
+		}
+
+		public CPos? NNChooseBuildLocation(string actorType)
+		{
+			// Alright, we can have multiple MCVs but that can be added later by adding another small network.
+			CPos center = GetRandomBaseCenter();
+
+			int HSZ = 16;
+			int SZ = 32;
+			var c1 = new CPos(center.X - HSZ, center.Y - HSZ);
+			var c2 = new CPos(c1.X + SZ, c1.Y + SZ);
+
+			// It doesn't makes much sense to use name <-> type intger in this context.
+			// Hence using building categorizer.
+			// 0. Production, 1. Defense, 2. AADefense, 3. Refinery, 4. Tech, 5. Tier3Tech, 6. SuperWeapon, 7. Power, 8. Other
+			// 9. Ore patch, to determine ref position
+			// 10. Non-enterable area (to find defensive pos)
+			// 11. Placable tiles, to restrict placement choice
+			// 12. (sent with request string) direction to enemy
+			// 13. (sent with string) the category of the building we want to place
+			// There are many channels but fortunately, all the values are intended to be binary.
+			var features = new List<int[]>(); // sparse features: x, y, ch.
+
+			var buildings = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player);
+			foreach (var b in buildings)
+			{
+				var loc = b.Location - c1;
+				if (loc.X < 0 || loc.Y < 0 || loc.X >= SZ || loc.Y >= SZ)
+					continue;
+				int ch = NNBuildingTypeToInt(b.Info.Name);
+				features.Add(new int[3] { loc.X, loc.Y, ch });
+			}
+
+			// Resources
+			for (int u = 0; u < SZ; u++)
+				for (int v = 0; v < SZ; v++)
+				{
+					var loc = new CPos(c1.X + v, c1.Y + u);
+					if (World.Map.Contains(loc) && resLayer.GetResource(loc) != null)
+						features.Add(new int[3] { v, u, 9 });
+				}
+
+			// To be accurate, need MOBILE trait, not terrain. Trees aren't enterable, as you know.
+			var mobileActor = World.ActorsWithTrait<Mobile>().Where(a =>
+				!Info.UnitsCommonNames.NavalUnits.Contains(a.Actor.Info.Name)).FirstOrDefault();
+			if (mobileActor.Trait != null)
+			{
+				var mobile = mobileActor.Trait;
+				for (int u = 0; u < SZ; u++)
+					for (int v = 0; v < SZ; v++)
+					{
+						var pos = new CPos(c1.X + v, c1.Y + u);
+						if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
+							features.Add(new int[3] { v, u, 10 });
+					}
+			}
+
+			// placaeble
+			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
+			if (bi == null)
+				return null;
+			foreach (var t in World.Map.FindTilesInCircle(center, Info.MaxBaseRadius))
+			{
+				if (World.Map.Contains(t) && World.CanPlaceBuilding(actorType, bi, t, null)
+					&& bi.IsCloseEnoughToBase(World, Player, actorType, t))
+				{
+					var loc = t - c1;
+					if (loc.X < 0 || loc.Y < 0 || loc.X >= SZ || loc.Y >= SZ)
+						continue;
+					features.Add(new int[3] { loc.X, loc.Y, 11 });
+				}
+			}
+
+			var rawData = new byte[3 * features.Count()];
+			int i = 0;
+			foreach (var coord in features)
+			{
+				rawData[i]   = (byte) coord[0];
+				rawData[i+1] = (byte) coord[1];
+				rawData[i+2] = (byte) coord[2];
+				i += 3;
+			}
+
+			var directionToEnemy = DirectionToEnemy(center);
+			if (directionToEnemy == null)
+				return null; // should have won already
+
+			//int2 selfLocation = cpos2uv(location);
+			string msg = "BUILDING_PLACEMENT_QUERY";
+			msg += " " + CanonicalAIName(Player);
+			msg += " " + directionToEnemy.Value.X;
+			msg += " " + directionToEnemy.Value.Y;
+			msg += " " + NNBuildingTypeToInt(actorType);
+			Send(msg);
+			client.Send(rawData, rawData.Length);
+
+			var xy = ReceiveCoordinate(SZ);
+			if (xy == null)
+				return null;
+
+			return new CPos(c1.X + xy.Value.X, c1.Y + xy.Value.Y);
 		}
 	}
 }
