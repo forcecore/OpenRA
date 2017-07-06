@@ -22,6 +22,7 @@ using OpenRA.Mods.Common.Traits;
 using OpenRA.Scripting;
 using OpenRA.Support;
 using OpenRA.Traits;
+using System.Threading;
 
 namespace OpenRA.Mods.Common.AI
 {
@@ -331,7 +332,8 @@ namespace OpenRA.Mods.Common.AI
 		readonly HashSet<Actor> luaOccupiedActors = new HashSet<Actor>();
 		readonly Dictionary<Player, AIScriptContext> luaContexts = new Dictionary<Player, AIScriptContext>();
 
-		UdpClient client;
+		public static Semaphore clientLock = new Semaphore(1, 1);
+		static UdpClient client;
 
 		public HackyAI(HackyAIInfo info, ActorInitializer init)
 		{
@@ -1564,7 +1566,10 @@ namespace OpenRA.Mods.Common.AI
 			// Capturable stuff
 			foreach (var u in World.Actors.Where(a => Info.CapturableActorTypes.Contains(a.Info.Name)))
 				msg += " " + u.Info.Name;
+
+			clientLock.WaitOne();
 			Send(msg);
+			clientLock.Release();
 
 			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
 		}
@@ -1685,11 +1690,18 @@ namespace OpenRA.Mods.Common.AI
 			// Capturable stuff
 			foreach (var u in World.Actors.Where(a => Info.CapturableActorTypes.Contains(a.Info.Name)))
 				msg += " " + u.Info.Name;
-			Send(msg);
 
-			// Get incoming result
-			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
-			var recv = client.Receive(ref remoteIpEndPoint);
+			byte[] recv;
+			clientLock.WaitOne();
+			{
+				Send(msg);
+
+				// Get incoming result
+				IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
+				recv = client.Receive(ref remoteIpEndPoint);
+			}
+			clientLock.Release();
+
 			string name = Encoding.UTF8.GetString(recv);
 
 			// Build nothing, on purpose.
@@ -1771,7 +1783,7 @@ namespace OpenRA.Mods.Common.AI
 
 			int SZ = 32; // output feature size SZ x SZ
 			int HSZ = 16; // half of the feature size
-			int NCH = 6; // feature channels
+			int NCH = 6; // feature channels (except direction to enemy)
 			int SCALE = 2; // Shrink 2x2 to 1x1
 
 			// channel order: (production buildings, defenses, buildings) x 2, (units, harvs) x 2
@@ -1782,6 +1794,7 @@ namespace OpenRA.Mods.Common.AI
 			// units: 3
 			// enemy pos: 4 (don't care building or not)
 			// terrain: 5
+			// direction to enemy: 6 (sent through request string)
 			int[,,] minimap = new int[SZ, SZ, NCH];
 
 			var c1 = new CPos(actor.Location.X - SCALE * HSZ, actor.Location.Y - SCALE * HSZ);
@@ -1849,7 +1862,7 @@ namespace OpenRA.Mods.Common.AI
 					CPos pos = new CPos(c1.X + v, c1.Y + u);
 					int2? uv = cpos2uv(pos, c1, SZ, SCALE);
 					if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
-						minimap[uv.Value.Y, uv.Value.X, NCH - 1] += 1;
+						minimap[uv.Value.Y, uv.Value.X, 5] += 1;
 				}
 
 			// minimap to send, into sparse number list.
@@ -1881,10 +1894,16 @@ namespace OpenRA.Mods.Common.AI
 			msg += " " + directionToEnemy.Value.X;
 			msg += " " + directionToEnemy.Value.Y;
 			msg += " " + vals.Count();
-			Send(msg);
-			client.Send(rawData, rawData.Length);
 
-			var coord = ReceiveCoordinate(SZ);
+			int2? coord;
+			clientLock.WaitOne();
+			{
+				Send(msg);
+				client.Send(rawData, rawData.Length);
+				coord = ReceiveCoordinate(SZ);
+			}
+			clientLock.Release();
+
 			latestGPComputed[requester] = World.WorldTick;
 
 			if (coord == null)
@@ -1992,6 +2011,7 @@ namespace OpenRA.Mods.Common.AI
 			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
 			if (bi == null)
 				return null;
+			int placeableCnt = 0;
 			foreach (var t in World.Map.FindTilesInCircle(center, Info.MaxBaseRadius))
 			{
 				if (World.Map.Contains(t) && World.CanPlaceBuilding(actorType, bi, t, null)
@@ -2001,8 +2021,12 @@ namespace OpenRA.Mods.Common.AI
 					if (loc.X < 0 || loc.Y < 0 || loc.X >= SZ || loc.Y >= SZ)
 						continue;
 					features.Add(new int[3] { loc.X, loc.Y, 11 });
+					placeableCnt++;
 				}
 			}
+
+			if (placeableCnt == 0)
+				return null;
 
 			var rawData = new byte[3 * features.Count()];
 			int i = 0;
@@ -2024,10 +2048,16 @@ namespace OpenRA.Mods.Common.AI
 			msg += " " + directionToEnemy.Value.X;
 			msg += " " + directionToEnemy.Value.Y;
 			msg += " " + NNBuildingTypeToInt(actorType);
-			Send(msg);
-			client.Send(rawData, rawData.Length);
 
-			var xy = ReceiveCoordinate(SZ);
+			int2? xy;
+			clientLock.WaitOne();
+			{
+				Send(msg);
+				client.Send(rawData, rawData.Length);
+				xy = ReceiveCoordinate(SZ);
+			}
+			clientLock.Release();
+
 			if (xy == null)
 				return null;
 
