@@ -121,8 +121,17 @@ namespace OpenRA.Mods.Common.AI
 		{
 			var currentBuilding = queue.CurrentItem();
 
+			// Are we building but, is it something duplicated?
+			if (currentBuilding != null
+				&& ai.Info.BuildingLimits.ContainsKey(currentBuilding.Item)
+				&& playerBuildings.Count(a => a.Info.Name == currentBuilding.Item)
+					>= ai.Info.BuildingLimits[currentBuilding.Item])
+			{
+				ai.QueueOrder(Order.CancelProduction(queue.Actor, currentBuilding.Item, 1));
+				return false;
+			}
 			// Waiting to build something
-			if (currentBuilding == null && failCount < ai.Info.MaximumFailedPlacementAttempts)
+			else if (currentBuilding == null && failCount < ai.Info.MaximumFailedPlacementAttempts)
 			{
 				var item = ChooseBuildingToBuild(queue);
 				if (item == null)
