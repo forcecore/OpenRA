@@ -148,6 +148,12 @@ namespace OpenRA.Mods.Common.Traits
 
 			var gameOver = players.All(p => p.WinState != WinState.Undefined || !p.HasObjectives);
 			if (gameOver)
+			{
+				var hackyAI = player.PlayerActor.TraitsImplementing<AI.HackyAI>().Where(b => b.IsEnabled).FirstOrDefault();
+				AI.HackyAI.clientLock.WaitOne();
+				hackyAI.Send("WIN " + hackyAI.CanonicalAIName(player));
+				AI.HackyAI.clientLock.Release();
+
 				Game.RunAfterDelay(Info.GameOverDelay, () =>
 				{
 					if (!Game.IsCurrentWorld(player.World))
@@ -157,12 +163,10 @@ namespace OpenRA.Mods.Common.Traits
 					player.World.SetPauseState(true);
 					player.World.PauseStateLocked = true;
 
-					var hackyAI = player.PlayerActor.TraitsImplementing<AI.HackyAI>().Where(b => b.IsEnabled).FirstOrDefault();
-					hackyAI.Send("WIN " + hackyAI.CanonicalAIName(player));
-
 					if (Game.Settings.Debug.AutoRestart)
 						Game.RestartGame();
 				});
+			}
 		}
 
 		public void OnPlayerWon(Player player)
