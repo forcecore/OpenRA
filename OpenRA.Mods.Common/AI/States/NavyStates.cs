@@ -15,27 +15,11 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.AI
 {
-	abstract class GroundStateBase : StateBase
+	abstract class NavyStateBase : StateBase
 	{
 		protected virtual bool ShouldFlee(Squad owner)
 		{
 			return base.ShouldFlee(owner, enemies => !AttackOrFleeFuzzy.Default.CanAttack(owner.Units, enemies));
-		}
-
-		protected void LogBattle(Squad owner, string prefix)
-		{
-			var stats = owner.Bot.Player.PlayerActor.Trait<PlayerStatistics>();
-			//owner.Bot.Send(prefix + "_MY_DEATH_COST");
-			owner.Bot.Send(prefix + "_DEATH_COST");
-			owner.Bot.Send(owner.Bot.Player.InternalName);
-			owner.Bot.Send(stats.DeathsCost.ToString());
-
-			//owner.Bot.Send(prefix + "_ENEMY_DEATH_COST");
-			var enemy = owner.World.Players.Where(p => p.InternalName.ToLower().StartsWith("multi") && p != owner.Bot.Player).First();
-			var stats2 = enemy.PlayerActor.Trait<PlayerStatistics>();
-			owner.Bot.Send(enemy.InternalName);
-			owner.Bot.Send(stats2.DeathsCost.ToString());
-			owner.Bot.Send("END");
 		}
 
 		protected Actor FindClosestEnemy(Squad owner)
@@ -43,11 +27,21 @@ namespace OpenRA.Mods.Common.AI
 			if (!owner.IsValid)
 				return null;
 
+			// For ships, cheat and move towards enemy naval production, if any.
+			var t = owner.World.Actors.Where(a
+				=> owner.Bot.Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name)
+				&& a.AppearsHostileTo(owner.Bot.Player.PlayerActor)).FirstOrDefault();
+
+			// If naval yard is too far away, return it.
+			// Else, FindClosest below will find suitable enemy targets :)
+			if (t != null && (t.Location - owner.Units.First().Location).LengthSquared > 20 * 20)
+				return t;
+
 			return owner.Bot.FindClosestEnemy(owner.Units.FirstOrDefault().CenterPosition);
 		}
 	}
 
-	class GroundUnitsIdleState : GroundStateBase, IState
+	class NavyUnitsIdleState : NavyStateBase, IState
 	{
 		public void Activate(Squad owner) { }
 
@@ -74,7 +68,7 @@ namespace OpenRA.Mods.Common.AI
 						owner.Bot.QueueOrder(new Order("AttackMove", u, false) { TargetLocation = owner.TargetActor.Location });
 
 					// We have gathered sufficient units. Attack the nearest enemy unit.
-					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsAttackMoveState(), true);
+					owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsAttackMoveState(), true);
 
 					// start log
 					/*
@@ -96,14 +90,14 @@ namespace OpenRA.Mods.Common.AI
 					return;
 				}
 				else
-					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
+					owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsFleeState(), true);
 			}
 		}
 
 		public void Deactivate(Squad owner) { }
 	}
 
-	class GroundUnitsAttackMoveState : GroundStateBase, IState
+	class NavyUnitsAttackMoveState : NavyStateBase, IState
 	{
 		public void Activate(Squad owner) { }
 
@@ -119,7 +113,7 @@ namespace OpenRA.Mods.Common.AI
 					owner.TargetActor = t;
 				else
 				{
-					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
+					owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsFleeState(), true);
 					return;
 				}
 			}
@@ -144,7 +138,7 @@ namespace OpenRA.Mods.Common.AI
 				if (target != null)
 				{
 					owner.TargetActor = target;
-					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsAttackState(), true);
+					owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsAttackState(), true);
 					return;
 				}
 				else
@@ -159,7 +153,7 @@ namespace OpenRA.Mods.Common.AI
 			if (ShouldFlee(owner))
 			{
 				//LogBattle(owner, "AFTERB");
-				owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
+				owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsFleeState(), true);
 				return;
 			}
 		}
@@ -167,7 +161,7 @@ namespace OpenRA.Mods.Common.AI
 		public void Deactivate(Squad owner) { }
 	}
 
-	class GroundUnitsAttackState : GroundStateBase, IState
+	class NavyUnitsAttackState : NavyStateBase, IState
 	{
 		public void Activate(Squad owner) { }
 
@@ -183,7 +177,7 @@ namespace OpenRA.Mods.Common.AI
 					owner.TargetActor = t;
 				else
 				{
-					owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
+					owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsFleeState(), true);
 					return;
 				}
 			}
@@ -201,7 +195,7 @@ namespace OpenRA.Mods.Common.AI
 			if (ShouldFlee(owner))
 			{
 				//LogBattle(owner, "AFTERB");
-				owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsFleeState(), true);
+				owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsFleeState(), true);
 				return;
 			}
 		}
@@ -209,7 +203,7 @@ namespace OpenRA.Mods.Common.AI
 		public void Deactivate(Squad owner) { }
 	}
 
-	class GroundUnitsFleeState : GroundStateBase, IState
+	class NavyUnitsFleeState : NavyStateBase, IState
 	{
 		public void Activate(Squad owner) { }
 
@@ -219,7 +213,7 @@ namespace OpenRA.Mods.Common.AI
 				return;
 
 			GoToRandomOwnBuilding(owner);
-			owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsIdleState(), true);
+			owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsIdleState(), true);
 		}
 
 		public void Deactivate(Squad owner) { owner.Units.Clear(); }
