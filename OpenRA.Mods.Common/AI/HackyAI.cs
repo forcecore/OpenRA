@@ -86,6 +86,7 @@ namespace OpenRA.Mods.Common.AI
 		public readonly bool NNProduction = false;
 		public readonly bool NNRallyPoint = false;
 		public readonly bool NNBuildingPlacer = false;
+		public HashSet<string> NNBuildingPlacerTerrainTypes = new HashSet<string>() { "Clear", "Road" };
 
 		[Desc("Minimum number of units AI must have before attacking.")]
 		public readonly int SquadSize = 8;
@@ -1993,19 +1994,14 @@ namespace OpenRA.Mods.Common.AI
 				}
 
 			// To be accurate, need MOBILE trait, not terrain. Trees aren't enterable, as you know.
-			var mobileActor = World.ActorsWithTrait<Mobile>().Where(a =>
-				!Info.UnitsCommonNames.NavalUnits.Contains(a.Actor.Info.Name)).FirstOrDefault();
-			if (mobileActor.Trait != null)
-			{
-				var mobile = mobileActor.Trait;
-				for (int u = 0; u < SZ; u++)
-					for (int v = 0; v < SZ; v++)
-					{
-						var pos = new CPos(c1.X + v, c1.Y + u);
-						if (World.Map.Contains(pos) && mobile.CanEnterCell(pos))
-							features.Add(new int[3] { v, u, 10 });
-					}
-			}
+			for (int u = 0; u < SZ; u++)
+				for (int v = 0; v < SZ; v++)
+				{
+					var pos = new CPos(c1.X + v, c1.Y + u);
+					if (World.Map.Contains(pos)
+							&& Info.NNBuildingPlacerTerrainTypes.Contains(World.Map.GetTerrainInfo(pos).Type))
+						features.Add(new int[3] { v, u, 10 });
+				}
 
 			// placaeble
 			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
