@@ -49,14 +49,14 @@ namespace OpenRA.Mods.Common.AI
 				case SquadType.Rush:
 					FuzzyStateMachine.ChangeState(this, new GroundUnitsIdleState(), true);
 					break;
-				case SquadType.Ships:
-					FuzzyStateMachine.ChangeState(this, new NavyUnitsIdleState(), true);
-					break;
 				case SquadType.Air:
 					FuzzyStateMachine.ChangeState(this, new AirIdleState(), true);
 					break;
 				case SquadType.Protection:
 					FuzzyStateMachine.ChangeState(this, new UnitsForProtectionIdleState(), true);
+					break;
+				case SquadType.Ships:
+					FuzzyStateMachine.ChangeState(this, new NavyUnitsIdleState(), true);
 					break;
 			}
 		}
