@@ -1111,7 +1111,7 @@ namespace OpenRA.Mods.Common.AI
 
 		public bool IsOwnedByEnemy(Actor a)
 		{
-			return Player.Stances[a.Owner] == Stance.Enemy && a.Owner.InternalName.ToLowerInvariant().StartsWith("multi");
+			return Player.Stances[a.Owner] == Stance.Enemy; // && a.Owner.InternalName.ToLowerInvariant().StartsWith("multi");
 		}
 
 		void TryToRushAttack()
