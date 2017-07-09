@@ -130,6 +130,17 @@ namespace OpenRA.Mods.Common.AI
 				return;
 			}
 
+			// Remove the paths in our base so that forces will move out first.
+			var ourBuildings = owner.World.ActorsHavingTrait<Building>().Where(b => b.Owner == owner.Bot.Player);
+			while (path.Count > 0)
+			{
+				var p = path.Last();
+				if ((ourBuildings.ClosestTo(owner.World.Map.CenterOfCell(p)).Location - p).LengthSquared <= 100)
+					path.RemoveAt(path.Count - 1);
+				else
+					break;
+			}
+
 			// Use beacon to show path haha
 			foreach (var p in path)
 			{
@@ -275,7 +286,13 @@ namespace OpenRA.Mods.Common.AI
 			{
 				// pop until far enough point found.
 				var p = path.Last();
-				if ((leader.World.Map.CenterOfCell(p) - leader.CenterPosition).LengthSquared < dist.LengthSquared)
+
+				// Are the teams flocked around the waypoint?
+				var membersNearBy = owner.World.FindActorsInCircle(leader.World.Map.CenterOfCell(p),
+					WDist.FromCells(owner.Units.Count) / 3)
+					.Where(a => a.Owner == leader.Owner && owner.Units.Contains(a)).ToHashSet();
+				if ((leader.World.Map.CenterOfCell(p) - leader.CenterPosition).LengthSquared < dist.LengthSquared
+					|| membersNearBy.Count >= owner.Units.Count)
 				{
 					path.RemoveAt(path.Count - 1);
 					continue;
