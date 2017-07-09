@@ -566,9 +566,8 @@ namespace OpenRA.Mods.Common.AI
 		public bool HasMinimumProc()
 		{
 			// Build refs for expansions
-			var cys = World.Actors.Where(a => a.Owner == Player &&
-				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
-			if (cys.Count() >= 2 && CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) < 2 * cys.Count())
+			var cyCnt = CountBuildingByCommonName(Info.BuildingCommonNames.ConstructionYard, Player);
+			if (cyCnt >= 2 && CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) < 2 * cyCnt)
 				return false;
 
 			// Require at least two refineries, unless we have no power (can't build it)
@@ -865,6 +864,7 @@ namespace OpenRA.Mods.Common.AI
 				FindNewUnits(self);
 				SuicideDemoUnits(self);
 				FindAndDeployBackupMcv(self);
+				SellUselessRefinery();
 			}
 
 			if (--minAttackForceDelayTicks <= 0)
@@ -1111,7 +1111,7 @@ namespace OpenRA.Mods.Common.AI
 
 		public bool IsOwnedByEnemy(Actor a)
 		{
-			return Player.Stances[a.Owner] == Stance.Enemy; // && a.Owner.InternalName.ToLowerInvariant().StartsWith("multi");
+			return Player.Stances[a.Owner] == Stance.Enemy && (!a.Owner.NonCombatant);
 		}
 
 		void TryToRushAttack()
@@ -1522,7 +1522,7 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var q in Info.UnitQueues)
 			{
 				if (Info.NNProduction)
-					QueryPipe(q);
+					NNProductionQuery(q);
 				else
 					BuildUnit(q, unitsHangingAroundTheBase.Count < Info.IdleBaseUnitsMaximum);
 			}
@@ -1650,7 +1650,23 @@ namespace OpenRA.Mods.Common.AI
 			client.Send(sendBytes, sendBytes.Length);
 		}
 
-		public void QueryPipe(string category)
+		// Check if CY can undeploy.
+		// For RA3 Empire, you only get many mini-mcvs that can't undeply so we need to check.
+		bool ConstructionYardCanUndeploy(string mcvActorName)
+		{
+			var transformInfo = World.Map.Rules.Actors[mcvActorName.ToLowerInvariant()].TraitInfoOrDefault<TransformsInfo>();
+			if (transformInfo == null)
+				return false; // You can't even deploy the actor
+
+			var cy = transformInfo.IntoActor;
+			var undeployInfo = World.Map.Rules.Actors[cy.ToLowerInvariant()].TraitInfoOrDefault<TransformsInfo>();
+			if (undeployInfo == null)
+				return false;
+
+			return mcvActorName.ToLowerInvariant() == undeployInfo.IntoActor.ToLowerInvariant();
+		}
+
+		public void NNProductionQuery(string category)
 		{
 			// Pick a free queue
 			var queue = FindQueues(category).FirstOrDefault(q => q.CurrentItem() == null);
@@ -1692,22 +1708,37 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var u in World.Actors.Where(a => Info.CapturableActorTypes.Contains(a.Info.Name)))
 				msg += " " + u.Info.Name;
 
-			byte[] recv;
 			clientLock.WaitOne();
-			{
-				Send(msg);
-
-				// Get incoming result
-				IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
-				recv = client.Receive(ref remoteIpEndPoint);
-			}
+			Send(msg);
+			string name = ReceiveString();
 			clientLock.Release();
 
-			string name = Encoding.UTF8.GetString(recv);
-
 			// Build nothing, on purpose.
-			if (name == "NULL")
+			if (name == null)
 				return;
+
+			if (Info.UnitsCommonNames.Mcv.Contains(name) && ConstructionYardCanUndeploy(name))
+			{
+				// Do we alrady have an MCV in the field?
+				var mcvs = World.Actors.Where(a => a.Owner == Player && a.Info.Name == name && !a.IsDead && !a.Disposed);
+				if (mcvs.Any())
+					return;
+
+				var cys = World.ActorsHavingTrait<Building>().Where(b
+					=> b.Owner == Player && Info.BuildingCommonNames.ConstructionYard.Contains(b.Info.Name)
+					&& !b.IsDead && !b.Disposed);
+
+				// We already have many CYs. Undeploy one instead.
+				if (cys.Count() >= 2)
+				{
+					var closestEnemy = cys.ClosestTo(FindClosestEnemy(cys.Random(Random).CenterPosition));
+					var furthestCY = cys.FurthestFrom(closestEnemy);
+					QueueOrder(new Order("DeployTransform", furthestCY, false));
+					return;
+				}
+			}
+
+			// For MCV, we keep the numbers limited.
 			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
 		}
 
@@ -1745,6 +1776,27 @@ namespace OpenRA.Mods.Common.AI
 				int y = index / sz;
 				int x = index % sz;
 				return new int2(x, y);
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		// When receiving linearized coordinate from the network, decode it as x, y.
+		// Return null on receive error.
+		string ReceiveString()
+		{
+			// Get incoming result
+			IPEndPoint remoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
+			client.Client.ReceiveTimeout = 2500;
+			try
+			{
+				var recv = client.Receive(ref remoteIpEndPoint);
+				string result = Encoding.UTF8.GetString(recv);
+				if (result == "NULL")
+					return null;
+				return result;
 			}
 			catch
 			{
@@ -2058,6 +2110,52 @@ namespace OpenRA.Mods.Common.AI
 				return null;
 
 			return new CPos(c1.X + xy.Value.X, c1.Y + xy.Value.Y);
+		}
+
+		// Returns negative number when unable to count (no harvester for this player).
+		int CountHarvestableCellsInRadius(CPos center, int radius)
+		{
+			var harvester = World.ActorsHavingTrait<Harvester>().FirstOrDefault(a => a.Owner == Player && !a.IsDead && !a.Disposed);
+			if (harvester == null)
+				return -1;
+
+			int sum = 0;
+			var harvInfo = harvester.Info.TraitInfo<HarvesterInfo>();
+			foreach (var t in World.Map.FindTilesInCircle(center, radius))
+				if (harvester.CanHarvestAt(t, resLayer, harvInfo, territory))
+					sum += 1;
+
+			return sum;
+		}
+
+		// Because AIs have build limits and to make them play like humans, we can SELL :)
+		// If the closest one is within 8 cells and resources have ran out + we got multiple CYs then refs are useless.
+		void SellUselessRefinery()
+		{
+			var cyCnt = CountBuildingByCommonName(Info.BuildingCommonNames.ConstructionYard, Player);
+			if (cyCnt <= 1)
+				return;
+
+			var refs = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player
+				&& !b.IsDead && !b.Disposed && Info.BuildingCommonNames.Refinery.Contains(b.Info.Name));
+
+			foreach (var r in refs)
+			{
+				var overlappingRef = refs.Where(a => a != r
+					&& (r.CenterPosition - a.CenterPosition).LengthSquared <= WDist.FromCells(8).LengthSquared);
+				if (!overlappingRef.Any())
+					continue;
+
+				var havestableCellsNear = CountHarvestableCellsInRadius(r.Location, 10);
+				if (havestableCellsNear < 0) // No harvester. Don't sell!
+					return;
+
+				if (havestableCellsNear < 10)
+				{
+					QueueOrder(new Order("Sell", r, false) { TargetActor = r });
+					break; // don't sell multiple refs all at once!!
+				}
+			}
 		}
 	}
 }

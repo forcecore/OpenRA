@@ -30,6 +30,16 @@ namespace OpenRA
 			return actors.MinByOrDefault(a => (a.CenterPosition - pos).LengthSquared);
 		}
 
+		public static Actor FurthestFrom(this IEnumerable<Actor> actors, Actor a)
+		{
+			return actors.FurthestFrom(a.CenterPosition);
+		}
+
+		public static Actor FurthestFrom(this IEnumerable<Actor> actors, WPos pos)
+		{
+			return actors.MaxByOrDefault(a => (a.CenterPosition - pos).LengthSquared);
+		}
+
 		public static WPos PositionClosestTo(this IEnumerable<WPos> positions, WPos pos)
 		{
 			return positions.MinByOrDefault(p => (p - pos).LengthSquared);
