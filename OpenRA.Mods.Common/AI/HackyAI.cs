@@ -109,6 +109,9 @@ namespace OpenRA.Mods.Common.AI
 		[Desc("Delay (in ticks) between updating squads.")]
 		public readonly int AttackForceInterval = 30;
 
+		[Desc("Delay (in ticks) between updating defense decision info")]
+		public readonly int DefenseInterval = 30;
+
 		[Desc("Minimum delay (in ticks) between creating squads.")]
 		public readonly int MinimumAttackForceDelay = 0;
 
@@ -324,6 +327,7 @@ namespace OpenRA.Mods.Common.AI
 		int rushTicks;
 		int assignRolesTicks;
 		int attackForceTicks;
+		int defenseTicks;
 		int minAttackForceDelayTicks;
 		int minCaptureDelayTicks;
 		readonly int maximumCaptureTargetOptions;
@@ -383,7 +387,7 @@ namespace OpenRA.Mods.Common.AI
 
 			// Don't make aircrafts land and take off like crazy
 			var pool = a.TraitOrDefault<AmmoPool>();
-			if (pool != null && pool.Info.SelfReloads == false && pool.HasAmmo() == false)
+			if (pool != null && pool.Info.SelfReloads == false && AirStateBase.IsRearm(a))
 				return true;
 
 			// Actors in luaOccupiedActors are under control of scripted actions and
@@ -735,10 +739,22 @@ namespace OpenRA.Mods.Common.AI
 					if (tmp != null)
 						baseCenter = tmp.Value;
 
+					WDist RefineryCoverRadius = WDist.FromCells(8);
+
+					// We'd only have only at most 6 of those so it won't be a performance issue.
+					var refs = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player && !b.IsDead && !b.Disposed);
+
 					// Try and place the refinery near a resource field
+					// Not using hash set, we wouldn't have too much resources, usually so list should be faster in most cases.
 					var nearbyResources = Map.FindTilesInAnnulus(baseCenter, Info.MinBaseRadius, Info.MaxBaseRadius)
 						.Where(a => resourceTypeIndices.Get(Map.GetTerrainIndex(a)))
-						.Shuffle(Random).Take(Info.MaxResourceCellsToCheck);
+						.Shuffle(Random).Take(Info.MaxResourceCellsToCheck)
+						.ToList();
+
+					// Remove covered ones
+					if (refs.Any())
+						nearbyResources.RemoveAll(r => (refs.ClosestTo(r).CenterPosition - Map.CenterOfCell(r))
+								.LengthSquared <= RefineryCoverRadius.LengthSquared);
 
 					foreach (var r in nearbyResources)
 					{
@@ -796,6 +812,8 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var b in builders)
 				b.Tick();
 
+			DefenseTick();
+
 			var ordersToIssueThisTick = Math.Min((orders.Count + Info.MinOrderQuotientPerTick - 1) / Info.MinOrderQuotientPerTick, orders.Count);
 			for (var i = 0; i < ordersToIssueThisTick; i++)
 				World.IssueOrder(orders.Dequeue());
@@ -821,7 +839,7 @@ namespace OpenRA.Mods.Common.AI
 		{
 			Squads.RemoveAll(s => !s.IsValid);
 			foreach (var s in Squads)
-				s.Units.RemoveAll(UnitCannotBeOrdered);
+				s.RemoveInvalidMembers(UnitCannotBeOrdered);
 		}
 
 		// Use of this function requires that one squad of this type. Hence it is a piece of shit
@@ -1172,7 +1190,7 @@ namespace OpenRA.Mods.Common.AI
 
 				foreach (var a in ownUnits)
 				{
-					protectSq.Units.Add(a);
+					protectSq.AddUnit(a);
 					WhichSquad[a] = protectSq;
 				}
 			}
@@ -1285,12 +1303,13 @@ namespace OpenRA.Mods.Common.AI
 			if (mines.Count() == 0)
 				return null;
 
-			var bases = World.Actors.Where(a => Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
-			var myBases = bases.Where(a => a.Owner == Player);
+			var bases = World.ActorsHavingTrait<Building>().Where(a => a.Owner == Player
+				&& (Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)
+					|| Info.BuildingCommonNames.Refinery.Contains(a.Info.Name)));
 			var radius2 = Info.MaxBaseRadius * Info.MaxBaseRadius;
 
 			// Maybe I have no base!
-			if (myBases.Count() == 0)
+			if (bases.Count() == 0)
 			{
 				var bi2 = Map.Rules.Actors[factType].TraitInfoOrDefault<BuildingInfo>();
 				return FindPos(mcv.Location, mcv.Location, Info.MinBaseRadius, 10, factType, bi2, false);
@@ -1320,7 +1339,7 @@ namespace OpenRA.Mods.Common.AI
 			int bestDistance = 0;
 			foreach (var m in uncoveredMines)
 			{
-				var cy = myBases.ClosestTo(m);
+				var cy = bases.ClosestTo(m);
 				var dist = (m.Location - cy.Location).LengthSquared;
 				if (bestMine == null || dist < bestDistance)
 				{
@@ -1359,17 +1378,19 @@ namespace OpenRA.Mods.Common.AI
 					continue;
 
 				// If we lack a base, we need to make sure we don't restrict deployment of the MCV to the base!
+				var transformInfo = mcv.Info.TraitInfo<TransformsInfo>();
 				var restrictToBase =
 					Info.RestrictMCVDeploymentFallbackToBase &&
 					CountBuildingByCommonName(Info.BuildingCommonNames.ConstructionYard, Player) > 0;
-				var factType = mcv.Info.TraitInfo<TransformsInfo>().IntoActor;
+				var factType = transformInfo.IntoActor;
 				var desiredLocation = FindExpansionLocation(mcv, factType);
 				if (desiredLocation == null)
 					desiredLocation = ChooseBuildLocation(factType, restrictToBase, BuildingPlacementType.Building);
 				if (desiredLocation == null)
 					continue;
 
-				QueueOrder(new Order("Move", mcv, true) { TargetLocation = desiredLocation.Value });
+				var loc = desiredLocation.Value - transformInfo.Offset;
+				QueueOrder(new Order("Move", mcv, true) { TargetLocation = loc });
 				QueueOrder(new Order("DeployTransform", mcv, true));
 			}
 		}
@@ -1426,6 +1447,32 @@ namespace OpenRA.Mods.Common.AI
 					waitingPowers[sp] += 10;
 					QueueOrder(new Order(sp.Key, supportPowerMngr.Self, false) { TargetLocation = attackLocation.Value, SuppressVisualFeedback = true });
 				}
+			}
+		}
+
+		void DefenseTick()
+		{
+			if (defenseTicks++ < Info.DefenseInterval)
+				return;
+			defenseTicks = 0;
+
+			var cys = World.Actors.Where(a => a.Owner == Player &&
+				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
+
+			if (!cys.Any())
+				return; // We are probably screwed already. Doesn't matter anymore.
+
+			foreach (var cy in cys)
+			{
+				var visibleEnemies = World.FindActorsInCircle(cy.CenterPosition, WDist.FromCells(Info.MaxBaseRadius))
+					.Where(a => IsEnemyUnit(a) && a.CanBeViewedByPlayer(Player));
+
+				if (!visibleEnemies.Any())
+					continue;
+
+				var enemy = visibleEnemies.ClosestTo(cy);
+				defenseCenter = enemy.Location;
+				ProtectOwn(enemy);
 			}
 		}
 
@@ -1522,7 +1569,7 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var q in Info.UnitQueues)
 			{
 				if (Info.NNProduction)
-					NNProductionQuery(q);
+					NNProductionQuery(q, true);
 				else
 					BuildUnit(q, unitsHangingAroundTheBase.Count < Info.IdleBaseUnitsMaximum);
 			}
@@ -1666,16 +1713,16 @@ namespace OpenRA.Mods.Common.AI
 			return mcvActorName.ToLowerInvariant() == undeployInfo.IntoActor.ToLowerInvariant();
 		}
 
-		public void NNProductionQuery(string category)
+		public string NNProductionQuery(string category, bool issueQueueOrder)
 		{
 			// Pick a free queue
 			var queue = FindQueues(category).FirstOrDefault(q => q.CurrentItem() == null);
 			if (queue == null)
-				return;
+				return null;
 
 			var tmp = queue.BuildableItems();
 			if (!tmp.Any())
-				return;
+				return null;
 			var buildableThings = new List<ActorInfo>();
 			foreach (var b in tmp)
 			{
@@ -1687,10 +1734,10 @@ namespace OpenRA.Mods.Common.AI
 				buildableThings.Add(b);
 			}
 			if (!buildableThings.Any())
-				return;
+				return null;
 
 			string msg = "UNIT_QUERY";
-			msg += " " + Player.InternalName;
+			msg += " " + CanonicalAIName(Player);
 
 			msg += " " + buildableThings.Count().ToString();
 			foreach (var b in buildableThings)
@@ -1715,14 +1762,18 @@ namespace OpenRA.Mods.Common.AI
 
 			// Build nothing, on purpose.
 			if (name == null)
-				return;
+				return null;
+
+			// I made semaphore to prevent this from happening but sometimes I get bad response.
+			if (!buildableThings.Any(bi => bi.Name == name))
+				return null;
 
 			if (Info.UnitsCommonNames.Mcv.Contains(name) && ConstructionYardCanUndeploy(name))
 			{
 				// Do we alrady have an MCV in the field?
 				var mcvs = World.Actors.Where(a => a.Owner == Player && a.Info.Name == name && !a.IsDead && !a.Disposed);
 				if (mcvs.Any())
-					return;
+					return null;
 
 				var cys = World.ActorsHavingTrait<Building>().Where(b
 					=> b.Owner == Player && Info.BuildingCommonNames.ConstructionYard.Contains(b.Info.Name)
@@ -1731,15 +1782,18 @@ namespace OpenRA.Mods.Common.AI
 				// We already have many CYs. Undeploy one instead.
 				if (cys.Count() >= 2)
 				{
-					var closestEnemy = cys.ClosestTo(FindClosestEnemy(cys.Random(Random).CenterPosition));
+					var closestEnemy = FindClosestEnemy(cys.Random(Random).CenterPosition);
+					if (closestEnemy == null)
+						return null; // We must have won!
 					var furthestCY = cys.FurthestFrom(closestEnemy);
 					QueueOrder(new Order("DeployTransform", furthestCY, false));
-					return;
+					return null;
 				}
 			}
 
-			// For MCV, we keep the numbers limited.
-			QueueOrder(Order.StartProduction(queue.Actor, name, 1));
+			if (issueQueueOrder)
+				QueueOrder(Order.StartProduction(queue.Actor, name, 1));
+			return name;
 		}
 
 		// reference: reference point.
@@ -2136,11 +2190,17 @@ namespace OpenRA.Mods.Common.AI
 			if (cyCnt <= 1)
 				return;
 
-			var refs = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player
-				&& !b.IsDead && !b.Disposed && Info.BuildingCommonNames.Refinery.Contains(b.Info.Name));
+			var refs = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player // my
+				&& !b.IsDead && !b.Disposed && Info.BuildingCommonNames.Refinery.Contains(b.Info.Name) // refineries
+				&& Info.BuildingLimits.ContainsKey(b.Info.Name)); // which are build limited
 
 			foreach (var r in refs)
 			{
+				// Did this one reach build limit in ai.yaml?
+				// Redundant check but simple. (and there won't be too many refs)
+				if (refs.Count(b => b.Info.Name == r.Info.Name) < Info.BuildingLimits[r.Info.Name])
+					continue;
+
 				var overlappingRef = refs.Where(a => a != r
 					&& (r.CenterPosition - a.CenterPosition).LengthSquared <= WDist.FromCells(8).LengthSquared);
 				if (!overlappingRef.Any())
