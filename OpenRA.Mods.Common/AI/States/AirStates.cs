@@ -167,7 +167,7 @@ namespace OpenRA.Mods.Common.AI
 			return ammoPools.All(x => x.Info.SelfReloads);
 		}
 
-		protected static bool IsRearm(Actor a)
+		public static bool IsRearm(Actor a)
 		{
 			if (a.IsIdle)
 				return false;
@@ -250,7 +250,7 @@ namespace OpenRA.Mods.Common.AI
 			if (!owner.IsTargetValid)
 			{
 				var a = owner.Units.Random(owner.Random);
-				var closestEnemy = owner.Bot.FindClosestEnemy(a.CenterPosition);
+				var closestEnemy = FindClosestEnemy(owner, a.CenterPosition);
 				if (closestEnemy != null)
 					owner.TargetActor = closestEnemy;
 				else
@@ -292,7 +292,7 @@ namespace OpenRA.Mods.Common.AI
 
 		void Flee(Squad owner, Actor a)
 		{
-			var safePoint = AirFleeState.CalcSafePoint(owner, owner.CenterLocation, EnemyStaticAAs(owner));
+			var safePoint = AirFleeState.CalcSafeDetourPoint(owner, owner.CenterLocation, EnemyStaticAAs(owner));
 			owner.Bot.QueueOrder(new Order("Move", a, false) { TargetLocation = safePoint });
 			owner.Bot.QueueOrder(new Order("ReturnToBase", a, true));
 		}
@@ -311,40 +311,38 @@ namespace OpenRA.Mods.Common.AI
 			if (!owner.IsValid)
 				safePoint = CPos.Zero;
 			else
-				safePoint = CalcSafePoint(owner, escapeDest, EnemyStaticAAs(owner));
+				safePoint = CalcSafeDetourPoint(owner, escapeDest, EnemyStaticAAs(owner));
 		}
 
-		public static CPos CalcSafePoint(Squad owner, CPos dest, IEnumerable<Actor> enemyStaticAAs)
+		public static CPos CalcSafeDetourPoint(Squad owner, CPos dest, IEnumerable<Actor> enemyStaticAAs)
 		{
 			if (!owner.IsValid)
 				return CPos.Zero;
 
-			if (!owner.World.Map.Contains(owner.CenterLocation))
+			if (!owner.World.Map.Contains(owner.CenterLocation) || !enemyStaticAAs.Any())
 				return RandomBuildingLocation(owner);
 
-			CPos currentPos = owner.CenterLocation;
-			List<CPos> cands = new List<CPos>();
-			cands.Add(dest); // direct movement
+			if (!owner.World.Map.Contains(dest))
+				dest = RandomBuildingLocation(owner);
 
-			var within20 = owner.World.Map.FindTilesInAnnulus(dest, 2, 20);
-			if (within20.Any())
-				for (int i = 0; i < 32; i++)
-					cands.Add(within20.Random(owner.Bot.Random));
+			// We will back up + slightly move to the left or right so
+			// eventually the aircraft will find a safe way in.
 
-			int best_score = -1;
-			CPos best = CPos.Zero;
-			foreach (var cand in cands)
-			{
-				var score = EvaluateSafePoint(currentPos, cand, enemyStaticAAs);
-				if (best_score == -1 || score < best_score)
-				{
-					best = cand;
-					best_score = score;
-				}
-			}
+			var unit = owner.Units.Random(owner.Bot.Random);
+			var closest = enemyStaticAAs.ClosestTo(unit);
+			var backDirection = unit.Location - closest.Location;
 
-			System.Diagnostics.Debug.Assert(owner.World.Map.Contains(best), "What? Unit out of map?");
-			return best;
+			CVec rotated;
+			if (owner.Random.Next(2) == 0) // choose left or right
+				rotated = new CVec(-backDirection.Y, backDirection.X);
+			else
+				rotated = new CVec(backDirection.Y, -backDirection.X);
+			var point = unit.Location + backDirection + rotated;
+
+			if (!owner.World.Map.Contains(point))
+				dest = RandomBuildingLocation(owner);
+
+			return point;
 		}
 
 		static int EvaluateSafePoint(CPos safePoint, CPos currentPos, IEnumerable<Actor> enemyStaticAAs)

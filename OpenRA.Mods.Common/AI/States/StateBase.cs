@@ -24,7 +24,14 @@ namespace OpenRA.Mods.Common.AI
 
 		protected static void GoToRandomOwnBuilding(Squad squad)
 		{
-			var loc = RandomBuildingLocation(squad);
+			CPos loc;
+			var nearByBuildings = squad.World.FindActorsInCircle(squad.CenterPosition, WDist.FromCells(squad.Bot.Info.MaxBaseRadius))
+				.Where(b => b.Owner == squad.Bot.Player && b.TraitOrDefault<Building>() != null);
+			if (nearByBuildings.Any())
+				loc = nearByBuildings.Random(squad.Bot.Random).Location;
+			else
+				loc = RandomBuildingLocation(squad);
+
 			foreach (var a in squad.Units)
 				squad.Bot.QueueOrder(new Order("Move", a, false) { TargetLocation = loc });
 		}
@@ -75,6 +82,27 @@ namespace OpenRA.Mods.Common.AI
 					return true;
 
 			return false;
+		}
+
+		protected virtual Actor FindClosestEnemy(Squad owner)
+		{
+			return FindClosestEnemy(owner, owner.CenterPosition);
+		}
+
+		protected virtual Actor FindClosestEnemy(Squad owner, WPos pos)
+		{
+			// Closest and ATTACKABLE enemy.
+			return owner.World.Actors.Where(owner.Bot.IsEnemyUnit)
+				.Where(a => owner.Units.Any(u => CanAttackTarget(u, a)))
+				.ClosestTo(pos);
+		}
+
+		protected virtual Actor FindClosestEnemy(Squad owner, WPos pos, WDist radius)
+		{
+			// Closest and ATTACKABLE enemy.
+			return owner.World.FindActorsInCircle(pos, radius).Where(owner.Bot.IsEnemyUnit)
+				.Where(a => owner.Units.Any(u => CanAttackTarget(u, a)))
+				.ClosestTo(pos);
 		}
 
 		protected virtual bool ShouldFlee(Squad squad, Func<IEnumerable<Actor>, bool> flee)

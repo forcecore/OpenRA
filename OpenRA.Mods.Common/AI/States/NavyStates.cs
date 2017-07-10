@@ -22,7 +22,7 @@ namespace OpenRA.Mods.Common.AI
 			return base.ShouldFlee(owner, enemies => !AttackOrFleeFuzzy.Default.CanAttack(owner.Units, enemies));
 		}
 
-		protected Actor FindClosestEnemy(Squad owner)
+		protected override Actor FindClosestEnemy(Squad owner)
 		{
 			if (!owner.IsValid)
 				return null;
@@ -32,12 +32,12 @@ namespace OpenRA.Mods.Common.AI
 				=> owner.Bot.Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name)
 				&& a.AppearsHostileTo(owner.Bot.Player.PlayerActor)).FirstOrDefault();
 
-			// If naval yard is too far away, return it.
+			// If naval yard is far away, return it.
 			// Else, FindClosest below will find suitable enemy targets :)
 			if (t != null && (t.Location - owner.Units.First().Location).LengthSquared > 20 * 20)
 				return t;
 
-			return owner.Bot.FindClosestEnemy(owner.Units.FirstOrDefault().CenterPosition);
+			return base.FindClosestEnemy(owner);
 		}
 	}
 
@@ -183,7 +183,7 @@ namespace OpenRA.Mods.Common.AI
 			}
 
 			// Switch target durign fight
-			var targetActor = owner.Bot.FindClosestEnemy(owner.Units.First().CenterPosition);
+			var targetActor = FindClosestEnemy(owner);
 			foreach (var a in owner.Units)
 				if (!BusyAttack(a))
 					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = targetActor });
@@ -216,6 +216,6 @@ namespace OpenRA.Mods.Common.AI
 			owner.FuzzyStateMachine.ChangeState(owner, new NavyUnitsIdleState(), true);
 		}
 
-		public void Deactivate(Squad owner) { owner.Units.Clear(); }
+		public void Deactivate(Squad owner) { owner.Disband(); }
 	}
 }

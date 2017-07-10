@@ -44,7 +44,7 @@ namespace OpenRA.Mods.Common.AI
 
 			if (!owner.IsTargetValid)
 			{
-				owner.TargetActor = owner.Bot.FindClosestEnemy(owner.CenterPosition, WDist.FromCells(8));
+				owner.TargetActor = FindClosestEnemy(owner, owner.CenterPosition, WDist.FromCells(8));
 
 				if (owner.TargetActor == null)
 				{
@@ -87,6 +87,6 @@ namespace OpenRA.Mods.Common.AI
 			owner.FuzzyStateMachine.ChangeState(owner, new UnitsForProtectionIdleState(), true);
 		}
 
-		public void Deactivate(Squad owner) { owner.Units.Clear(); }
+		public void Deactivate(Squad owner) { owner.Disband(); }
 	}
 }

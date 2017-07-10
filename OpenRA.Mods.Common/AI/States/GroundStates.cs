@@ -40,11 +40,6 @@ namespace OpenRA.Mods.Common.AI
 			owner.Bot.Send(stats2.DeathsCost.ToString());
 			owner.Bot.Send("END");
 		}
-
-		protected Actor FindClosestEnemy(Squad owner)
-		{
-			return owner.Bot.FindClosestEnemy(owner.Units.FirstOrDefault().CenterPosition);
-		}
 	}
 
 	class GroundUnitsIdleState : GroundStateBase, IState
@@ -98,11 +93,14 @@ namespace OpenRA.Mods.Common.AI
 	{
 		List<CPos> path;
 		Actor leader;
+		readonly int MaxTries = 100;
+		int tries = 0;
 
 		public void Activate(Squad owner)
 		{
 			// Compute these at activation time and stick with it.
 			// If enemy builds more towers, tough.
+			tries = 0;
 
 			var enemyBuildings = owner.World.ActorsHavingTrait<Building>().Where(b
 				=> owner.Bot.IsOwnedByEnemy(b) && !b.IsDead && !b.Disposed);
@@ -280,7 +278,7 @@ namespace OpenRA.Mods.Common.AI
 			// As for leader, move along the path.
 			// The leader can move this far (at best) until next update.
 			// Erm... This makes units clutter. Make target position further.
-			WDist dist = new WDist(2 * owner.Bot.Info.AttackForceInterval * leader.Info.TraitInfo<MobileInfo>().Speed);
+			WDist radius = WDist.FromCells(5);
 
 			while (path.Count > 0)
 			{
@@ -288,19 +286,19 @@ namespace OpenRA.Mods.Common.AI
 				var p = path.Last();
 
 				// Are the teams flocked around the waypoint?
-				var membersNearBy = owner.World.FindActorsInCircle(leader.World.Map.CenterOfCell(p),
-					WDist.FromCells(owner.Units.Count) / 3)
-					.Where(a => a.Owner == leader.Owner && owner.Units.Contains(a)).ToHashSet();
-				if ((leader.World.Map.CenterOfCell(p) - leader.CenterPosition).LengthSquared < dist.LengthSquared
-					|| membersNearBy.Count >= owner.Units.Count)
+				if ((leader.World.Map.CenterOfCell(p) - leader.CenterPosition).LengthSquared < radius.LengthSquared)
 				{
 					path.RemoveAt(path.Count - 1);
+					tries = 0;
 					continue;
 				}
 
 				// Move to the next waypoint.
 				foreach (var u in owner.Units)
 					owner.Bot.QueueOrder(new Order("AttackMove", u, false) { TargetLocation = p });
+
+				if (tries++ > MaxTries)
+					break; // and fall to attack move mode.
 
 				var position = owner.World.Map.CenterOfCell(p);
 				var beacon = owner.Bot.Player.PlayerActor.Info.TraitInfo<PlaceBeaconInfo>();
@@ -328,17 +326,22 @@ namespace OpenRA.Mods.Common.AI
 
 		public static bool IsGrouppedWell(Squad owner, Actor leader)
 		{
-			var membersNearBy = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(owner.Units.Count) / 3)
+			IEnumerable<Actor> tmp;
+			return IsGrouppedWell(owner, leader, out tmp);
+		}
+
+		public static bool IsGrouppedWell(Squad owner, Actor leader, out IEnumerable<Actor> membersNearBy)
+		{
+			var membersNear = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(Math.Max(5, owner.Units.Count)) / 3)
 				.Where(a => a.Owner == leader.Owner && owner.Units.Contains(a)).ToHashSet();
-			return membersNearBy.Count >= owner.Units.Count;
+			membersNearBy = membersNear;
+			return membersNear.Count >= 3 * owner.Units.Count / 4;
 		}
 
 		public void Tick(Squad owner)
 		{
-			var membersNearBy = owner.World.FindActorsInCircle(Leader.CenterPosition, WDist.FromCells(owner.Units.Count) / 3)
-				.Where(a => a.Owner == Leader.Owner && owner.Units.Contains(a)).ToHashSet();
-
-			if (membersNearBy.Count >= owner.Units.Count)
+			IEnumerable<Actor> membersNearBy;
+			if (IsGrouppedWell(owner, Leader, out membersNearBy))
 			{
 				owner.FuzzyStateMachine.RevertToPreviousState(owner, false);
 				return;
@@ -496,7 +499,7 @@ namespace OpenRA.Mods.Common.AI
 			}
 
 			// Switch target durign fight
-			var targetActor = owner.Bot.FindClosestEnemy(owner.Units.First().CenterPosition);
+			var targetActor = FindClosestEnemy(owner);
 			foreach (var a in owner.Units)
 				if (!BusyAttack(a))
 					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = targetActor });
@@ -529,6 +532,6 @@ namespace OpenRA.Mods.Common.AI
 			owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsIdleState(), true);
 		}
 
-		public void Deactivate(Squad owner) { owner.Units.Clear(); }
+		public void Deactivate(Squad owner) { owner.Disband(); }
 	}
 }
