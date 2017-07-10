@@ -30,6 +30,13 @@ namespace OpenRA
 			return actors.MinByOrDefault(a => (a.CenterPosition - pos).LengthSquared);
 		}
 
+		public static Actor ClosestTo(this IEnumerable<Actor> actors, CPos pos)
+		{
+			if (!actors.Any())
+				return null;
+			return actors.ClosestTo(actors.First().World.Map.CenterOfCell(pos));
+		}
+
 		public static Actor FurthestFrom(this IEnumerable<Actor> actors, Actor a)
 		{
 			return actors.FurthestFrom(a.CenterPosition);
