@@ -46,7 +46,11 @@ namespace OpenRA.Mods.AS.Traits
 
 		[Desc("Deploy only when there are more enemies than friendly units nearby?")]
 		public readonly bool DeployOnEnemy = false;
-		[Desc("When counting, scan within this radius")]
+
+		[Desc("Similar to DeployOnEnemy but less strict. Our buildings == 0 then it will deploy.")]
+		public readonly bool DeployNotInMyBase = false;
+
+		[Desc("When counting, scan within this radius (in cells)")]
 		public readonly int ActorScanRadius = 10;
 
 		public object Create(ActorInitializer init) { return new AIDeployHelper(this); }
@@ -89,6 +93,15 @@ namespace OpenRA.Mods.AS.Traits
 				int nenemy = units.Where(a => !a.Owner.NonCombatant && a.AppearsHostileTo(self)).Count();
 
 				if (nfriendly > nenemy)
+					return;
+			}
+
+			// not else-if haha
+			if (info.DeployNotInMyBase)
+			{
+				var buildings = self.World.FindActorsInCircle(self.CenterPosition, WDist.FromCells(info.ActorScanRadius))
+					.Where(a => !a.IsDead && !a.Disposed && a.Owner == self.Owner && a.TraitOrDefault<Building>() != null);
+				if (buildings.Any())
 					return;
 			}
 
