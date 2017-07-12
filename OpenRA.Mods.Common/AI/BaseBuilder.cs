@@ -194,7 +194,11 @@ namespace OpenRA.Mods.Common.AI
 				if (!ai.Info.BuildingLimits.ContainsKey(actor.Name))
 					return true;
 
-				return playerBuildings.Count(a => a.Info.Name == actor.Name) <= ai.Info.BuildingLimits[actor.Name];
+				if (ai.Info.BuildingCommonNames.ConstructionYard.Contains(actor.Name))
+					return playerBuildings.Count(a => a.Info.Name == actor.Name) <= ai.Info.BuildingLimits[actor.Name];
+				else
+					return playerBuildings.Count(a => a.Info.Name == actor.Name) <=
+						ai.Info.BuildingLimits[actor.Name] * ai.GetConstructionYards().Count();
 			});
 
 			if (orderBy != null)
@@ -394,12 +398,10 @@ namespace OpenRA.Mods.Common.AI
 				var count = playerBuildings.Count(a => a.Info.Name == name);
 				if (count > frac.Value * playerBuildings.Length)
 				{
-					// Game goes too turtly if we include defense
-					//if (queue.Info.Type == "Defense" || ai.Info.BuildingCommonNames.Refinery.Contains(ai.Info.Name))
-					if (ai.Info.BuildingCommonNames.Refinery.Contains(ai.Info.Name))
+					if (queue.Info.Type == "Defense" || ai.Info.BuildingCommonNames.Refinery.Contains(ai.Info.Name))
 					{
 						// If defense or proc, multiply it by # of FACT.
-						var facts = playerBuildings.Where(a => ai.Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)).Count();
+						var facts = ai.GetConstructionYards().Count(); // the queue won't tick without a CY haha
 						if (count > frac.Value * playerBuildings.Length * facts)
 							continue;
 					}
