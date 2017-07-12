@@ -279,10 +279,15 @@ namespace OpenRA.Mods.Common.AI
 		public MersenneTwister Random { get; private set; }
 		public readonly HackyAIInfo Info;
 
+		public IEnumerable<Actor> GetConstructionYards()
+		{
+			return World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player
+				&& !b.IsDead && !b.Disposed && Info.BuildingCommonNames.ConstructionYard.Contains(b.Info.Name));
+		}
+
 		public CPos GetRandomBaseCenter()
 		{
-			var randomConstructionYard = World.Actors.Where(a => a.Owner == Player &&
-				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name))
+			var randomConstructionYard = GetConstructionYards()
 				.RandomOrDefault(Random);
 
 			return randomConstructionYard != null ? randomConstructionYard.Location : initialBaseCenter;
@@ -569,11 +574,6 @@ namespace OpenRA.Mods.Common.AI
 
 		public bool HasMinimumProc()
 		{
-			// Build refs for expansions
-			var cyCnt = CountBuildingByCommonName(Info.BuildingCommonNames.ConstructionYard, Player);
-			if (cyCnt >= 2 && CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) < 2 * cyCnt)
-				return false;
-
 			// Require at least two refineries, unless we have no power (can't build it)
 			// or barracks (higher priority?)
 			return CountBuildingByCommonName(Info.BuildingCommonNames.Refinery, Player) >= 2 ||
@@ -659,8 +659,7 @@ namespace OpenRA.Mods.Common.AI
 
 		public CPos? GetNoRefCY()
 		{
-			var cys = World.Actors.Where(a => a.Owner == Player &&
-				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)).ToList();
+			var cys = GetConstructionYards().ToList();
 			var refs = World.Actors.Where(a => a.Owner == Player &&
 				Info.BuildingCommonNames.Refinery.Contains(a.Info.Name));
 
@@ -829,10 +828,10 @@ namespace OpenRA.Mods.Common.AI
 			return World.FindActorsInCircle(pos, radius).Where(IsEnemyUnit).ClosestTo(pos);
 		}
 
-		List<Actor> FindEnemyConstructionYards()
+		IEnumerable<Actor> FindEnemyConstructionYards()
 		{
-			return World.Actors.Where(a => IsOwnedByEnemy(a) && !a.IsDead &&
-				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)).ToList();
+			return World.ActorsHavingTrait<Building>().Where(b => IsOwnedByEnemy(b)
+				&& !b.IsDead && !b.Disposed && Info.BuildingCommonNames.ConstructionYard.Contains(b.Info.Name));
 		}
 
 		void CleanSquads()
@@ -1173,7 +1172,7 @@ namespace OpenRA.Mods.Common.AI
 			}
 		}
 
-		void ProtectOwn(Actor attacker)
+		void ProtectOwn(Actor underAttack, Actor attacker)
 		{
 			var protectSq = GetSquadOfType(SquadType.Protection);
 			if (protectSq == null)
@@ -1184,7 +1183,7 @@ namespace OpenRA.Mods.Common.AI
 
 			if (!protectSq.IsValid)
 			{
-				var ownUnits = World.FindActorsInCircle(World.Map.CenterOfCell(GetRandomBaseCenter()), WDist.FromCells(Info.ProtectUnitScanRadius))
+				var ownUnits = World.FindActorsInCircle(World.Map.CenterOfCell(underAttack.Location), WDist.FromCells(Info.ProtectUnitScanRadius))
 					.Where(unit => unit.Owner == Player && !unit.Info.HasTraitInfo<BuildingInfo>() && !unit.Info.HasTraitInfo<HarvesterInfo>()
 						&& unit.Info.HasTraitInfo<AttackBaseInfo>());
 
@@ -1193,6 +1192,30 @@ namespace OpenRA.Mods.Common.AI
 					protectSq.AddUnit(a);
 					WhichSquad[a] = protectSq;
 				}
+			}
+		}
+
+		void ProtectMCV(Actor mcv)
+		{
+			// Don't bother searching for any existing squad. Make an independent one.
+			var protectSq = RegisterNewSquad(SquadType.Escort, mcv);
+
+			var ownUnits = World.FindActorsInCircle(mcv.CenterPosition, WDist.FromCells(Info.ProtectUnitScanRadius))
+				.Where(unit => unit.Owner == Player && !unit.Info.HasTraitInfo<BuildingInfo>()
+					&& !unit.Info.HasTraitInfo<HarvesterInfo>()
+					&& unit.Info.HasTraitInfo<AttackBaseInfo>())
+				.Take(10);
+
+			if (!ownUnits.Any())
+				ownUnits = World.ActorsHavingTrait<AttackBase>()
+					.Where(unit => unit.Owner == Player && !unit.Info.HasTraitInfo<BuildingInfo>()
+						&& !unit.Info.HasTraitInfo<HarvesterInfo>())
+					.Take(10);
+
+			foreach (var a in ownUnits)
+			{
+				protectSq.AddUnit(a);
+				WhichSquad[a] = protectSq;
 			}
 		}
 
@@ -1209,7 +1232,7 @@ namespace OpenRA.Mods.Common.AI
 			foreach (var rp in self.World.ActorsWithTrait<RallyPoint>())
 				if (rp.Actor.Owner == Player
 						&& (!IsRallyPointValid(rp.Trait.Location, rp.Actor.Info.TraitInfoOrDefault<BuildingInfo>())
-							|| rallyPointTicks > 5 * 25)
+							|| rallyPointTicks > 5 * 25) // periodically set rally point so that units are scattered around
 					)
 				{
 					QueueOrder(new Order("SetRallyPoint", rp.Actor, false)
@@ -1225,25 +1248,22 @@ namespace OpenRA.Mods.Common.AI
 		// Won't work for shipyards...
 		CPos ChooseRallyLocationNear(Actor producer)
 		{
-			if (Info.NNRallyPoint && !Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
+			var center = producer.Location;
+			if (!Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
 			{
-				// ANY unit will do, regardless of owner.
-				var footUnits = World.ActorsWithTrait<Mobile>().Where(pair => !Info.UnitsCommonNames.NavalUnits.Contains(pair.Actor.Info.Name));
-				if (footUnits.Any())
-				{
-					CPos? goodPos = NNFindRallyPointPosition(producer, footUnits.First().Trait, Player);
-					if (goodPos.HasValue)
-						return goodPos.Value;
-				}
+				var cys = GetConstructionYards();
+				var enemy = FindClosestEnemy(producer.CenterPosition);
+				if (cys.Any() && enemy != null)
+					center = cys.ClosestTo(enemy).Location;
 			}
 
-			var possibleRallyPoints = Map.FindTilesInCircle(producer.Location, Info.RallyPointScanRadius)
+			var possibleRallyPoints = Map.FindTilesInCircle(center, Info.RallyPointScanRadius)
 				.Where(c => IsRallyPointValid(c, producer.Info.TraitInfoOrDefault<BuildingInfo>()));
 
 			if (!possibleRallyPoints.Any())
 			{
-				BotDebug("Bot Bug: No possible rallypoint near {0}", producer.Location);
-				return producer.Location;
+				BotDebug("Bot Bug: No possible rallypoint near {0}", center);
+				return center;
 			}
 
 			return possibleRallyPoints.Random(Random);
@@ -1306,7 +1326,7 @@ namespace OpenRA.Mods.Common.AI
 			var bases = World.ActorsHavingTrait<Building>().Where(a => a.Owner == Player
 				&& (Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name)
 					|| Info.BuildingCommonNames.Refinery.Contains(a.Info.Name)));
-			var radius2 = Info.MaxBaseRadius * Info.MaxBaseRadius;
+			var radius2 = 10 * 10;
 
 			// Maybe I have no base!
 			if (bases.Count() == 0)
@@ -1327,7 +1347,7 @@ namespace OpenRA.Mods.Common.AI
 
 			// Get uncovered mines
 			List<Actor> uncoveredMines = new List<Actor>();
-			foreach (var m in World.ActorsHavingTrait<SeedsResource>())
+			foreach (var m in World.ActorsHavingTrait<SeedsResource>().Where(a => a.Owner.NonCombatant))
 				if (!coveredMines.Contains(m))
 					uncoveredMines.Add(m);
 
@@ -1335,33 +1355,24 @@ namespace OpenRA.Mods.Common.AI
 				return null; // All covered :(
 
 			// Find a closest uncovered mine.
-			Actor bestMine = null;
-			int bestDistance = 0;
-			foreach (var m in uncoveredMines)
-			{
-				var cy = bases.ClosestTo(m);
-				var dist = (m.Location - cy.Location).LengthSquared;
-				if (bestMine == null || dist < bestDistance)
-				{
-					bestMine = m;
-					bestDistance = dist;
-				}
-			}
+			Actor bestMine = uncoveredMines.ClosestTo(mcv);
 
 			// With a good mine point, find a deployabe location.
 			var bi = Map.Rules.Actors[factType].TraitInfoOrDefault<BuildingInfo>();
 
 			// Max radius is too big. Starting from small radius
-			var pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, 10, factType, bi, false);
+			// Use front vector to prevent deploying right deep in enemy territory
+			CVec front = bestMine.Location - mcv.Location;
+			var pos = FindPosFront(bestMine.Location, front, Info.MinBaseRadius, 10, factType, bi, false);
 			if (pos == null)
-				pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, 15, factType, bi, false);
+				pos = FindPosFront(bestMine.Location, front, Info.MinBaseRadius, 15, factType, bi, false);
 			if (pos == null)
 				pos = FindPos(bestMine.Location, bestMine.Location, Info.MinBaseRadius, Info.MaxBaseRadius, factType, bi, false);
 			if (pos == null)
 				return null;
 
 			defenseCenter = pos.Value;
-			ProtectOwn(null);
+			ProtectMCV(mcv);
 			return pos;
 		}
 
@@ -1456,8 +1467,7 @@ namespace OpenRA.Mods.Common.AI
 				return;
 			defenseTicks = 0;
 
-			var cys = World.Actors.Where(a => a.Owner == Player &&
-				Info.BuildingCommonNames.ConstructionYard.Contains(a.Info.Name));
+			var cys = GetConstructionYards();
 
 			if (!cys.Any())
 				return; // We are probably screwed already. Doesn't matter anymore.
@@ -1472,7 +1482,7 @@ namespace OpenRA.Mods.Common.AI
 
 				var enemy = visibleEnemies.ClosestTo(cy);
 				defenseCenter = enemy.Location;
-				ProtectOwn(enemy);
+				ProtectOwn(cy, enemy);
 			}
 		}
 
@@ -1599,9 +1609,17 @@ namespace OpenRA.Mods.Common.AI
 				World.Actors.Count(a => a.Owner == Player && a.Info.Name == name) >= Info.UnitLimits[name])
 				return;
 
+			var buildableThings = GetBuildableThings(queue);
+			if (buildableThings == null)
+				return;
+
 			string msg = "BASE_AI_UNIT_LOG";
-			msg += " " + Player.InternalName;
+			msg += " " + CanonicalAIName(Player);
 			msg += " " + name;
+
+			msg += " " + buildableThings.Count().ToString();
+			foreach (var b in buildableThings)
+				msg += " " + b.Name;
 
 			var mine = World.Actors.Where(a => a.Owner == Player);
 			msg += " " + mine.Count().ToString();
@@ -1663,7 +1681,7 @@ namespace OpenRA.Mods.Common.AI
 				Player.Stances[e.Attacker.Owner] == Stance.Enemy)
 			{
 				defenseCenter = e.Attacker.Location;
-				ProtectOwn(e.Attacker);
+				ProtectOwn(self, e.Attacker);
 			}
 			else
 			{
@@ -1713,16 +1731,12 @@ namespace OpenRA.Mods.Common.AI
 			return mcvActorName.ToLowerInvariant() == undeployInfo.IntoActor.ToLowerInvariant();
 		}
 
-		public string NNProductionQuery(string category, bool issueQueueOrder)
+		List<ActorInfo> GetBuildableThings(ProductionQueue queue)
 		{
-			// Pick a free queue
-			var queue = FindQueues(category).FirstOrDefault(q => q.CurrentItem() == null);
-			if (queue == null)
-				return null;
-
 			var tmp = queue.BuildableItems();
 			if (!tmp.Any())
 				return null;
+
 			var buildableThings = new List<ActorInfo>();
 			foreach (var b in tmp)
 			{
@@ -1733,7 +1747,19 @@ namespace OpenRA.Mods.Common.AI
 
 				buildableThings.Add(b);
 			}
-			if (!buildableThings.Any())
+
+			return buildableThings;
+		}
+
+		public string NNProductionQuery(string category, bool issueQueueOrder)
+		{
+			// Pick a free queue
+			var queue = FindQueues(category).FirstOrDefault(q => q.CurrentItem() == null);
+			if (queue == null)
+				return null;
+
+			var buildableThings = GetBuildableThings(queue);
+			if (buildableThings == null)
 				return null;
 
 			string msg = "UNIT_QUERY";
@@ -1775,9 +1801,7 @@ namespace OpenRA.Mods.Common.AI
 				if (mcvs.Any())
 					return null;
 
-				var cys = World.ActorsHavingTrait<Building>().Where(b
-					=> b.Owner == Player && Info.BuildingCommonNames.ConstructionYard.Contains(b.Info.Name)
-					&& !b.IsDead && !b.Disposed);
+				var cys = GetConstructionYards();
 
 				// We already have many CYs. Undeploy one instead.
 				if (cys.Count() >= 2)
@@ -1786,6 +1810,15 @@ namespace OpenRA.Mods.Common.AI
 					if (closestEnemy == null)
 						return null; // We must have won!
 					var furthestCY = cys.FurthestFrom(closestEnemy);
+
+					// Does it have a refinery near?
+					var refs = World.FindActorsInCircle(furthestCY.CenterPosition, WDist.FromCells(Info.MaxBaseRadius))
+						.Where(a => a.Owner == Player && !a.IsDead && !a.Disposed
+							&& Info.BuildingCommonNames.Refinery.Contains(a.Info.Name));
+
+					if (!refs.Any())
+						return null;
+
 					QueueOrder(new Order("DeployTransform", furthestCY, false));
 					return null;
 				}
@@ -2216,6 +2249,6 @@ namespace OpenRA.Mods.Common.AI
 					break; // don't sell multiple refs all at once!!
 				}
 			}
-		}
+		}	
 	}
 }
