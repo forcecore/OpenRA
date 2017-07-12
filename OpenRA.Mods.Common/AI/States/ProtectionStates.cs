@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Linq;
+
 namespace OpenRA.Mods.Common.AI
 {
 	class UnitsForProtectionIdleState : GroundStateBase, IState
@@ -72,6 +74,43 @@ namespace OpenRA.Mods.Common.AI
 		}
 
 		public void Deactivate(Squad owner) { }
+	}
+
+	class UnitsForProtectionEscortState : GroundStateBase, IState
+	{
+		Actor referenceEnemy;
+
+		public void Activate(Squad owner) { }
+
+		public void Tick(Squad owner)
+		{
+			if (!owner.IsValid)
+				return;
+
+			if (owner.TargetActor == null || owner.TargetActor.IsDead || owner.TargetActor.Disposed
+					|| !owner.TargetActor.AppearsFriendlyTo(owner.Units.First()))
+				owner.FuzzyStateMachine.ChangeState(owner, new UnitsForProtectionFleeState(), true);
+
+			var pos = owner.CenterPosition;
+
+			if (referenceEnemy == null || referenceEnemy.IsDead || referenceEnemy.Disposed)
+				referenceEnemy = FindClosestEnemy(owner, pos);
+
+			// We won!
+			if (referenceEnemy == null)
+				return;
+
+			var vec = referenceEnemy.Location - owner.TargetActor.Location;
+			if (vec == CVec.Zero)
+				return;
+			vec = 10 * vec / vec.Length;
+
+			// MCV is closer. Catch up.
+			foreach (var a in owner.Units)
+				owner.Bot.QueueOrder(new Order("AttackMove", a, false) { TargetLocation = owner.TargetActor.Location + vec });
+		}
+
+		public void Deactivate(Squad owner) { owner.Disband(); }
 	}
 
 	class UnitsForProtectionFleeState : GroundStateBase, IState

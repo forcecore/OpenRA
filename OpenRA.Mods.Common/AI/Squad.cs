@@ -19,7 +19,7 @@ using System.Collections.ObjectModel;
 
 namespace OpenRA.Mods.Common.AI
 {
-	public enum SquadType { Assault, Air, Rush, Protection, Ships }
+	public enum SquadType { Assault, Air, Rush, Protection, Ships, Escort }
 
 	public class Squad
 	{
@@ -56,6 +56,9 @@ namespace OpenRA.Mods.Common.AI
 					break;
 				case SquadType.Protection:
 					FuzzyStateMachine.ChangeState(this, new UnitsForProtectionIdleState(), true);
+					break;
+				case SquadType.Escort:
+					FuzzyStateMachine.ChangeState(this, new UnitsForProtectionEscortState(), true);
 					break;
 				case SquadType.Ships:
 					FuzzyStateMachine.ChangeState(this, new NavyUnitsIdleState(), true);
