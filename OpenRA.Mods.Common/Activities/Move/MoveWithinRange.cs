@@ -47,6 +47,13 @@ namespace OpenRA.Mods.Common.Activities
 			var maxCells = (maxRange.Length + 1023) / 1024;
 			var minCells = minRange.Length / 1024;
 
+			if (minCells != 0 && Target.IsInRange(self.CenterPosition, minRange))
+			{
+				return map.FindTilesInAnnulus(targetPosition, minCells, maxCells)
+					.Where(c => AtCorrectRange(map.CenterOfCell(c)) // With only this, seige weapons CHARGE to the target. Annoying.
+					&& CVec.Dot(c - self.Location, targetPosition - self.Location) < 0);
+			}
+
 			// AtCorrectRange(map.CenterOfCell(c)) will return the current cell if the cell center is in range,
 			// even if the actor is actually out of range due to its current subcell not being the center.
 			// Avoid that by not including the current Location if the current actor.CenterPosition is out of range.
