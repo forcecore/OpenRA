@@ -123,10 +123,12 @@
     <Compile Include="ActorExts.cs" />
     <Compile Include="AI\AttackOrFleeFuzzy.cs" />
     <Compile Include="AI\BaseBuilder.cs" />
+    <Compile Include="AI\KMeans.cs" />
     <Compile Include="AI\HackyAI.cs" />
     <Compile Include="AI\Squad.cs" />
     <Compile Include="AI\StateMachine.cs" />
     <Compile Include="AI\States\AirStates.cs" />
+    <Compile Include="AI\States\InfiltrateStates.cs" />
     <Compile Include="AI\States\NavyStates.cs" />
     <Compile Include="AI\States\GroundStates.cs" />
     <Compile Include="AI\States\ProtectionStates.cs" />

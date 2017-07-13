@@ -84,9 +84,11 @@ namespace OpenRA.Mods.Common.AI
 
 		[Desc("EXPERIMENTAL")]
 		public readonly bool NNProduction = false;
-		public readonly bool NNRallyPoint = false;
 		public readonly bool NNBuildingPlacer = false;
 		public HashSet<string> NNBuildingPlacerTerrainTypes = new HashSet<string>() { "Clear", "Road" };
+
+		public readonly bool NNTroopPositioning = false;
+		public readonly int NNTroopPositioningInterval = 375; // once in 15 seconds should be enough.
 
 		[Desc("Minimum number of units AI must have before attacking.")]
 		public readonly int SquadSize = 8;
@@ -304,6 +306,7 @@ namespace OpenRA.Mods.Common.AI
 		readonly IPathFinder pathfinder;
 
 		public readonly Func<Actor, bool> IsEnemyUnit;
+		public readonly Func<Actor, bool> IsMyUnit;
 		Dictionary<SupportPowerInstance, int> waitingPowers = new Dictionary<SupportPowerInstance, int>();
 		Dictionary<string, SupportPowerDecision> powerDecisions = new Dictionary<string, SupportPowerDecision>();
 
@@ -360,6 +363,10 @@ namespace OpenRA.Mods.Common.AI
 
 			IsEnemyUnit = unit =>
 				IsOwnedByEnemy(unit)
+					&& !unit.Info.HasTraitInfo<HuskInfo>()
+					&& unit.Info.HasTraitInfo<ITargetableInfo>();
+			IsMyUnit = unit =>
+				unit.Owner == Player
 					&& !unit.Info.HasTraitInfo<HuskInfo>()
 					&& unit.Info.HasTraitInfo<ITargetableInfo>();
 
@@ -808,6 +815,9 @@ namespace OpenRA.Mods.Common.AI
 			SetRallyPointsForNewProductionBuildings(self);
 			TryToUseSupportPower(self);
 
+			if (Info.NNTroopPositioning)
+				PositionTroops(self);
+
 			foreach (var b in builders)
 				b.Tick();
 
@@ -998,7 +1008,15 @@ namespace OpenRA.Mods.Common.AI
 			if (target.Actor == null)
 				return;
 
-			QueueOrder(new Order(target.OrderString, capturer, true) { TargetActor = target.Actor });
+			// HACK: use sneaky if external capture if owned by enemy.
+			if (IsEnemyUnit(target.Actor) && capturer.TraitOrDefault<ExternalCaptures>() != null)
+			{
+				var cap = RegisterNewSquad(SquadType.ExternalCapture);
+				cap.AddUnit(capturer);
+				WhichSquad[capturer] = cap;
+			}
+			else
+				QueueOrder(new Order(target.OrderString, capturer, true) { TargetActor = target.Actor });
 			BotDebug("AI ({0}): Ordered {1} to capture {2}", Player.ClientIndex, capturer, target.Actor);
 			activeUnits.Remove(capturer);
 		}
@@ -1230,10 +1248,7 @@ namespace OpenRA.Mods.Common.AI
 			rallyPointTicks++;
 
 			foreach (var rp in self.World.ActorsWithTrait<RallyPoint>())
-				if (rp.Actor.Owner == Player
-						&& (!IsRallyPointValid(rp.Trait.Location, rp.Actor.Info.TraitInfoOrDefault<BuildingInfo>())
-							|| rallyPointTicks > 5 * 25) // periodically set rally point so that units are scattered around
-					)
+				if (rp.Actor.Owner == Player && !IsRallyPointValid(rp.Trait.Location, rp.Actor.Info.TraitInfoOrDefault<BuildingInfo>()))
 				{
 					QueueOrder(new Order("SetRallyPoint", rp.Actor, false)
 					{
@@ -1248,22 +1263,13 @@ namespace OpenRA.Mods.Common.AI
 		// Won't work for shipyards...
 		CPos ChooseRallyLocationNear(Actor producer)
 		{
-			var center = producer.Location;
-			if (!Info.BuildingCommonNames.NavalProduction.Contains(producer.Info.Name))
-			{
-				var cys = GetConstructionYards();
-				var enemy = FindClosestEnemy(producer.CenterPosition);
-				if (cys.Any() && enemy != null)
-					center = cys.ClosestTo(enemy).Location;
-			}
-
-			var possibleRallyPoints = Map.FindTilesInCircle(center, Info.RallyPointScanRadius)
+			var possibleRallyPoints = Map.FindTilesInCircle(producer.Location, Info.RallyPointScanRadius)
 				.Where(c => IsRallyPointValid(c, producer.Info.TraitInfoOrDefault<BuildingInfo>()));
 
 			if (!possibleRallyPoints.Any())
 			{
-				BotDebug("Bot Bug: No possible rallypoint near {0}", center);
-				return center;
+				BotDebug("Bot Bug: No possible rallypoint near {0}", producer.Location);
+				return producer.Location;
 			}
 
 			return possibleRallyPoints.Random(Random);
@@ -1913,6 +1919,7 @@ namespace OpenRA.Mods.Common.AI
 		Dictionary<Player, CPos?> lastGoodPosition = new Dictionary<Player, CPos?>();
 		public CPos? NNFindRallyPointPosition(Actor actor, Mobile mobile, Player requester)
 		{
+			// OBSOLETE.
 			if (latestGPComputed.ContainsKey(requester) && (World.WorldTick - latestGPComputed[requester]) < 75)
 			{
 				if (lastGoodPosition.ContainsKey(requester))
@@ -2249,6 +2256,197 @@ namespace OpenRA.Mods.Common.AI
 					break; // don't sell multiple refs all at once!!
 				}
 			}
-		}	
+		}
+
+		Dictionary<CPos, int> MakeMinimapDensityFeature(IEnumerable<Actor> actors, int sz)
+		{
+			var result = new Dictionary<CPos, int>();
+
+			foreach (var a in actors)
+			{
+				var gridPos = cpos2MimapCPos(a.Location, sz);
+				if (!gridPos.HasValue)
+					continue;
+
+				if (result.ContainsKey(gridPos.Value))
+					result[gridPos.Value] += 1;
+				else
+					result[gridPos.Value] = 1;
+			}
+
+			return result;
+		}
+
+		// Similar to cpos2uv but this one aims to make a MINIMAP of the whole map.
+		CPos? cpos2MimapCPos(CPos location, int sz)
+		{
+			int x = sz * (location.X - Map.Bounds.Left) / Map.Bounds.Width;
+			int y = sz * (location.Y - Map.Bounds.Top) / Map.Bounds.Height;
+			if (x < 0 || y < 0)
+				return null;
+			if (x >= sz || y >= sz)
+				return null;
+
+			return new CPos(x, y);
+		}
+
+		void SerializeSparseFeatures(List<int> inout, int layerNumber, Dictionary<CPos, int> features)
+		{
+			// layer number of the feature, in 3D tensor.
+			foreach (var kv in features)
+			{
+				inout.Add(kv.Key.X);
+				inout.Add(kv.Key.Y);
+				inout.Add(layerNumber);
+				inout.Add(kv.Value);
+			}
+		}
+
+		void SendTensor(List<int> vals)
+		{
+			// Note that we only send data, no size info.
+			// Also note that we don't lock and unlock!
+
+			var rawData = new byte[vals.Count()];
+			for (int i = 0; i < rawData.Length; i++)
+				rawData[i] = (byte) vals[i];
+			client.Send(rawData, rawData.Length);
+		}
+
+		int positionTroopTicks = 0;
+		public CPos? AttackCenter = null;
+		void PositionTroops(Actor self)
+		{
+			// goingAttack: are we making this call to determine to go attack or to stay in base?
+
+			// Let's have an NN deciding the position of the troops.
+			if (++positionTroopTicks < Info.NNTroopPositioningInterval)
+				return;
+			positionTroopTicks = 0;
+
+			List<Actor> ourBuildings = new List<Actor>();
+			List<Actor> ourUnits = new List<Actor>();
+			List<Actor> enemyBuildings = new List<Actor>();
+			List<Actor> enemyUnits = new List<Actor>();
+
+			foreach (var a in World.Actors)
+			{
+				if (IsMyUnit(a))
+				{
+					if (a.Info.TraitInfoOrDefault<BuildingInfo>() != null)
+						ourBuildings.Add(a);
+					else
+						ourUnits.Add(a);
+				}
+				else if (IsEnemyUnit(a))
+				{
+					if (a.Info.TraitInfoOrDefault<BuildingInfo>() != null)
+						enemyBuildings.Add(a);
+					else
+						enemyUnits.Add(a);
+				}
+			}
+
+			int SZ = 16;
+			var ourBuildingFeature = MakeMinimapDensityFeature(ourBuildings, SZ);
+			var enemyBuildingFeature = MakeMinimapDensityFeature(enemyBuildings, SZ);
+			var ourUnitFeature = MakeMinimapDensityFeature(ourUnits, SZ);
+			var enemyUnitFeature = MakeMinimapDensityFeature(enemyUnits, SZ);
+
+			// minimap to send, into sparse number list.
+			// Too big so converting to bytes.
+			List<int> vals = new List<int>();
+			SerializeSparseFeatures(vals, 0, ourBuildingFeature);
+			SerializeSparseFeatures(vals, 1, enemyBuildingFeature);
+			SerializeSparseFeatures(vals, 2, ourUnitFeature);
+			SerializeSparseFeatures(vals, 3, enemyUnitFeature);
+
+			string msg = "ATTACK_DEFEND_RETREAT";
+			msg += " " + CanonicalAIName(Player);
+			// size and nch is defined by the constant in the model, we adjust this code to the model not the otherway round
+			// hence these numbers don't need to be transferred.
+			//msg += " " + SZ.ToString();
+			//msg += " 4"; // num input channels
+			msg += " " + vals.Count();
+
+			clientLock.WaitOne();
+				Send(msg);
+				SendTensor(vals);
+				int2? coord = ReceiveCoordinate(SZ);
+			clientLock.Release();
+
+			// do nothing.
+			if (!coord.HasValue)
+				return;
+
+			// The coord is in 16x16 coordinate. Convert it back.
+			int x = coord.Value.X;
+			int y = coord.Value.Y;
+			x *= Map.Bounds.Width / SZ;
+			y *= Map.Bounds.Height / SZ;
+			x += Map.Bounds.Left;
+			y += Map.Bounds.Top;
+			x += (Map.Bounds.Width / 2) / SZ; // center of the bin
+			y += (Map.Bounds.Height / 2) / SZ; // center of the bin
+			var center = new CPos(x, y);
+
+			var enemyInGrid = World.FindActorsInCircle(Map.CenterOfCell(center), WDist.FromCells(Info.MaxBaseRadius)).Where(IsEnemyUnit);
+			var enemyBuildingInGrid = enemyInGrid.Where(b => b.Info.TraitInfoOrDefault<BuildingInfo>() != null);
+			if (enemyBuildingInGrid.Any())
+			{
+				AttackCenter = center;
+				Game.Debug("Attack Center Set for " + Player.InternalName);
+			}
+
+			var ourBuildingInGrid = World.FindActorsInCircle(Map.CenterOfCell(center), WDist.FromCells(Info.MaxBaseRadius))
+				.Where(b => b.Owner == Player && b.Info.TraitInfoOrDefault<BuildingInfo>() != null);
+			if (ourBuildingInGrid.Any())
+			{
+				defenseCenter = center;
+				var enemyUnitsInGrid = enemyInGrid.Where(a => a.TraitsImplementing<AttackBase>().Any());
+				if (enemyUnitsInGrid.Any())
+					DispatchUnits(center, true);
+				else
+				{
+					DispatchUnits(center, false);
+				}
+			}
+		}
+
+		// On emergency we make attackikng forces retreat.
+		// Else we just make units haning around the base to move.
+		void DispatchUnits(CPos center, bool emergency)
+		{
+			CPos? loc = null;
+			foreach (var t in Map.FindTilesInCircle(center, 10))
+				if (!World.ActorMap.GetActorsAt(t).Any())
+				{
+					loc = t;
+					break;
+				}
+
+			if (!emergency)
+				Game.Debug("Defense center set: " + Player.InternalName);
+			else
+				Game.Debug("RETREAT! " + Player.InternalName);
+
+			// too crowdy I guess
+			if (!loc.HasValue)
+				return;
+
+			// Make idle units go there.
+			foreach (var a in unitsHangingAroundTheBase)
+				QueueOrder(new Order("AttackMove", a, false) { TargetLocation = loc.Value });
+
+			if (emergency)
+				// Also disband attack teams and let them come here.
+				foreach (var squad in Squads)
+					if (squad.Type == SquadType.Assault || squad.Type == SquadType.Rush)
+					{
+						foreach (var a in squad.Units)
+							QueueOrder(new Order("AttackMove", a, false) { TargetLocation = loc.Value });
+						squad.Disband();
+					}
+		}
 	}
 }

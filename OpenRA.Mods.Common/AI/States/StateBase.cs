@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Mods.Common.Activities;
+using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
@@ -121,6 +122,112 @@ namespace OpenRA.Mods.Common.AI
 				return false;
 
 			return flee(enemyAroundUnit);
+		}
+
+		// From bulidings, pick ones that aren't in range of defenses.
+		List<Actor> UnprotectedBuildings(IEnumerable<Actor> buildings, IEnumerable<Actor> defenses)
+		{
+			var result = new List<Actor>();
+
+			foreach (var b in buildings)
+			{
+				bool covered = false;
+
+				foreach (var d in defenses)
+				{
+					var maxRangeSq = d.TraitsImplementing<Armament>().Min(a => a.MaxRange()).LengthSquared;
+					if (d == b || ((b.CenterPosition - d.CenterPosition).LengthSquared < maxRangeSq))
+					{
+						covered = true;
+						break;
+					}
+				}
+
+				if (!covered)
+					result.Add(b);
+			}
+
+			return result;
+		}
+
+		Dictionary<CPos, int> MakeInfluenceMap(IEnumerable<Actor> defenses, World world)
+		{
+			var result = new Dictionary<CPos, int>();
+
+			foreach (var d in defenses)
+			{
+				// Tower ranges can be computed but, nah. Not very useful.
+				// We need enough MARGIN (for both practical engagement avoidance and algorithm to work)
+				foreach (var t in world.Map.FindTilesInCircle(d.Location, 14))
+				{
+					if (result.ContainsKey(t))
+						result[t] += 1;
+					else
+						result[t] = 1;
+				}
+			}
+
+			return result;
+		}
+
+		protected virtual List<CPos> FindSafeRoute(Squad owner, IEnumerable<Actor> buildings, IEnumerable<Actor> defenses)
+		{
+			if (!defenses.Any())
+				throw new InvalidProgramException("Bad programmer called FindSafeRoute without any defenses");
+
+			var influenceMap = MakeInfluenceMap(defenses, owner.World);
+
+			// Find a detour.
+			var world = owner.World;
+			var unit = owner.Units.First(a => a.Info.TraitInfoOrDefault<MobileInfo>() != null);
+			var pathFinder = world.WorldActor.Trait<IPathFinder>();
+			var mobileInfo = unit.Info.TraitInfo<MobileInfo>();
+			DomainIndex domainIndex = world.WorldActor.Trait<DomainIndex>();
+
+			Func<CPos, int> costFunc = loc =>
+			{
+				if (influenceMap.ContainsKey(loc))
+					return 100 * influenceMap[loc]; // 10 doesn't work. 100 works.
+				return 1;
+			};
+
+			var passable = (uint)mobileInfo.GetMovementClass(world.Map.Rules.TileSet);
+			List<CPos> path;
+			var search = PathSearch.Search(world, mobileInfo, unit, true,
+					loc => domainIndex.IsPassable(unit.Location, loc, mobileInfo, passable)
+						&& (unit.Location - loc).LengthSquared < 4)
+					.WithCustomCost(costFunc);
+			foreach (var b in buildings)
+				search = search.FromPoint(b.Location);
+			path = pathFinder.FindPath(search);
+			search.Dispose();
+
+			path.Reverse();
+			return path;
+		}
+
+		protected virtual Actor PickLeader(Squad owner)
+		{
+			// Sometimes Husk gets mixed in for some reason so we can't use MinBy.
+			// owner.Units.MinBy(a => a.Info.TraitInfo<MobileInfo>().Speed);
+
+			Actor leader = null;
+			int speed = 0;
+
+			foreach (var u in owner.Units)
+			{
+				var mi = u.Info.TraitInfoOrDefault<MobileInfo>();
+				if (mi == null)
+					continue;
+
+				if (leader == null || mi.Speed < speed)
+				{
+					leader = u;
+					speed = mi.Speed;
+				}
+			}
+
+			return leader;
 		}
 	}
 }
