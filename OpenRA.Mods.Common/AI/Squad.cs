@@ -28,15 +28,15 @@ namespace OpenRA.Mods.Common.AI
 		public SquadType Type;
 
 		internal World World;
-		internal HackyAI Bot;
+		internal IBot Bot;
 		internal MersenneTwister Random;
 
 		internal Target Target;
 		internal StateMachine FuzzyStateMachine;
 
-		public Squad(HackyAI bot, SquadType type) : this(bot, type, null) { }
+		public Squad(IBot bot, SquadType type) : this(bot, type, null) { }
 
-		public Squad(HackyAI bot, SquadType type, Actor target)
+		public Squad(IBot bot, SquadType type, Actor target)
 		{
 			Bot = bot;
 			World = bot.World;

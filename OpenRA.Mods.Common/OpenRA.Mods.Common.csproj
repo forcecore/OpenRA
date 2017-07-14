@@ -123,6 +123,7 @@
     <Compile Include="ActorExts.cs" />
     <Compile Include="AI\AttackOrFleeFuzzy.cs" />
     <Compile Include="AI\BaseBuilder.cs" />
+    <Compile Include="AI\ExpertAI\ExpertAI.cs" />
     <Compile Include="AI\KMeans.cs" />
     <Compile Include="AI\HackyAI.cs" />
     <Compile Include="AI\Squad.cs" />

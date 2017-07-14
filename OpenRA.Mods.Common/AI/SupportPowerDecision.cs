@@ -89,7 +89,7 @@ namespace OpenRA.Mods.Common.AI
 			return answer;
 		}
 
-		public int GetNextScanTime(HackyAI ai) { return ai.Random.Next(MinimumScanTimeInterval, MaximumScanTimeInterval); }
+		public int GetNextScanTime(IBot ai) { return ai.Random.Next(MinimumScanTimeInterval, MaximumScanTimeInterval); }
 
 		/// <summary>Makes up part of a decision, describing how to evaluate a target.</summary>
 		public class Consideration

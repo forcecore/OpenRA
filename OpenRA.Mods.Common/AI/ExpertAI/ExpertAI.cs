@@ -26,24 +26,7 @@ using System.Threading;
 
 namespace OpenRA.Mods.Common.AI
 {
-	class CaptureTarget<TInfoType> where TInfoType : class, ITraitInfoInterface
-	{
-		internal readonly Actor Actor;
-		internal readonly TInfoType Info;
-
-		/// <summary>The order string given to the capturer so they can capture this actor.</summary>
-		/// <example>ExternalCaptureActor</example>
-		internal readonly string OrderString;
-
-		internal CaptureTarget(Actor actor, string orderString)
-		{
-			Actor = actor;
-			Info = actor.Info.TraitInfoOrDefault<TInfoType>();
-			OrderString = orderString;
-		}
-	}
-
-	public sealed class HackyAIInfo : IBotInfo, ITraitInfo
+	public sealed class ExpertAIInfo : IBotInfo, ITraitInfo
 	{
 		public class UnitCategories
 		{
@@ -69,23 +52,13 @@ namespace OpenRA.Mods.Common.AI
 			public readonly HashSet<string> StaticAntiAir = new HashSet<string>();
 			public readonly HashSet<string> Fragile = new HashSet<string>();
 			public readonly HashSet<string> Defense = new HashSet<string>();
-			public readonly HashSet<string> NNTech = new HashSet<string>();
-			public readonly HashSet<string> NNTier3Tech = new HashSet<string>();
-			public readonly HashSet<string> SuperWeapon = new HashSet<string>();
 		}
 
 		[Desc("Ingame name this bot uses.")]
 		public readonly string Name = "Unnamed Bot";
 
-		[Desc("The Script AI will read and execute")]
-		public readonly string LuaScript;
-
-		[Desc("Build units according to Lua script? (false = old hacky AI behavior).")]
-		public readonly bool EnableLuaUnitProduction = false;
-
 		[Desc("EXPERIMENTAL")]
 		public readonly bool NNProduction = false;
-		public readonly bool NNBuildingPlacer = false;
 		public HashSet<string> NNBuildingPlacerTerrainTypes = new HashSet<string>() { "Clear", "Road" };
 
 		public readonly bool NNTroopPositioning = false;
@@ -271,16 +244,13 @@ namespace OpenRA.Mods.Common.AI
 			return ret;
 		}
 
-		public object Create(ActorInitializer init) { return new HackyAI(this, init); }
+		public object Create(ActorInitializer init) { return new ExpertAI(this, init); }
 	}
 
-	public enum BuildingPlacementType { Building, Defense, Refinery, Fragile }
-	public enum NNBuildingPlacementType { Production, Defense, AADefense, Refinery, Tech, Tier3Tech, SuperWeapon, Power, Other }
-
-	public sealed class HackyAI : ITick, IBot, INotifyDamage
+	public sealed class ExpertAI : ITick, IBot, INotifyDamage
 	{
 		public MersenneTwister Random { get; private set; }
-		public readonly HackyAIInfo Info;
+		public readonly ExpertAIInfo Info;
 
 		public IEnumerable<Actor> GetConstructionYards()
 		{
@@ -328,8 +298,8 @@ namespace OpenRA.Mods.Common.AI
 
 		public const int FeedbackTime = 30; // ticks; = a bit over 1s. must be >= netlag.
 
-		public readonly World world;
-		public Map Map { get { return World.Map; } }
+		readonly World world;
+		public Map Map { get { return world.Map; } }
 		IBotInfo IBot.Info { get { return Info; } }
 
 		public CPos? AttackCenter { get { return attackCenter; } }
@@ -348,13 +318,10 @@ namespace OpenRA.Mods.Common.AI
 
 		readonly Queue<Order> orders = new Queue<Order>();
 
-		readonly HashSet<Actor> luaOccupiedActors = new HashSet<Actor>();
-		readonly Dictionary<Player, AIScriptContext> luaContexts = new Dictionary<Player, AIScriptContext>();
-
 		public static Semaphore clientLock = new Semaphore(1, 1);
 		static UdpClient client;
 
-		public HackyAI(HackyAIInfo info, ActorInitializer init)
+		public ExpertAI(ExpertAIInfo info, ActorInitializer init)
 		{
 			Info = info;
 			world = init.World;
@@ -381,19 +348,6 @@ namespace OpenRA.Mods.Common.AI
 			client.Connect("localhost", 9999);
 		}
 
-		public void SetLuaOccupied(Actor a, bool occupied)
-		{
-			if (occupied)
-				luaOccupiedActors.Add(a);
-			else
-				luaOccupiedActors.Remove(a);
-		}
-
-		public bool IsLuaOccupied(Actor a)
-		{
-			return luaOccupiedActors.Contains(a);
-		}
-
 		bool UnitCannotBeOrdered(Actor a)
 		{
 			if (a.Owner != Player || a.IsDead || !a.IsInWorld)
@@ -404,9 +358,7 @@ namespace OpenRA.Mods.Common.AI
 			if (pool != null && pool.Info.SelfReloads == false && AirStateBase.IsRearm(a))
 				return true;
 
-			// Actors in luaOccupiedActors are under control of scripted actions and
-			// shouldn't be ordered by the default hacky controller.
-			return IsLuaOccupied(a);
+			return false;
 		}
 
 		public static void BotDebug(string s, params object[] args)
@@ -423,26 +375,6 @@ namespace OpenRA.Mods.Common.AI
 			playerPower = p.PlayerActor.Trait<PowerManager>();
 			supportPowerMngr = p.PlayerActor.Trait<SupportPowerManager>();
 			playerResource = p.PlayerActor.Trait<PlayerResources>();
-
-			if (luaContexts.ContainsKey(p))
-			{
-				luaContexts[p].Dispose();
-				luaContexts.Remove(p);
-			}
-
-			AIScriptContext context = null;
-			if (Info.LuaScript != null)
-			{
-				// when no script given, Hacky AI behavior is still in effect and will continue to work as before.
-				string[] scripts = { Info.LuaScript };
-				context = new AIScriptContext(World, scripts); // Create context (not yet activated)
-				luaContexts.Add(p, context);
-			}
-
-			foreach (var building in Info.BuildingQueues)
-				builders.Add(new BaseBuilder(this, building, p, playerPower, playerResource, context));
-			foreach (var defense in Info.DefenseQueues)
-				builders.Add(new BaseBuilder(this, defense, p, playerPower, playerResource, context));
 
 			Random = new MersenneTwister(Game.CosmeticRandom.Next());
 
@@ -699,9 +631,6 @@ namespace OpenRA.Mods.Common.AI
 		CPos defenseCenter;
 		public CPos? ChooseBuildLocation(string actorType, bool distanceToBaseIsImportant, BuildingPlacementType type)
 		{
-			if (Info.NNBuildingPlacer && !Info.BuildingCommonNames.NavalProduction.Contains(actorType))
-				return NNChooseBuildLocation(actorType);
-
 			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
 			if (bi == null)
 				return null;
@@ -797,23 +726,10 @@ namespace OpenRA.Mods.Common.AI
 			ticks++;
 
 			if (ticks == 1)
-			{
 				InitializeBase(self);
 
-				// Activating here. Some variables aren't available in Lua at tick 0.
-				foreach (var kv in luaContexts)
-					kv.Value.ActivateAI(Player.Faction.Name, Player.InternalName);
-			}
-			else
-			{
-				// Don't tick at ticks 0 and 1.
-				if (Info.EnableLuaUnitProduction) // tick each lua AI context only when told so.
-					foreach (var kv in luaContexts)
-						kv.Value.Tick(self);
-			}
-
-			// Fall back to hacky random production when lua production not set.
-			if (!Info.EnableLuaUnitProduction && ticks % FeedbackTime == 0)
+			// Fall back to Expert random production when lua production not set.
+			if (ticks % FeedbackTime == 0)
 				ProductionUnits(self);
 
 			AssignRolesToIdleUnits(self);
@@ -2072,148 +1988,6 @@ namespace OpenRA.Mods.Common.AI
 			return newPos;
 		}
 
-		int NNBuildingTypeToInt(string actorType)
-		{
-			if (Info.BuildingCommonNames.ConstructionYard.Contains(actorType))
-				return (int)NNBuildingPlacementType.Production;
-
-			if (Info.BuildingCommonNames.Barracks.Contains(actorType))
-				return (int)NNBuildingPlacementType.Production;
-
-			if (Info.BuildingCommonNames.VehiclesFactory.Contains(actorType))
-				return (int)NNBuildingPlacementType.Production;
-
-			if (Info.BuildingCommonNames.Defense.Contains(actorType))
-				return (int)NNBuildingPlacementType.Defense;
-
-			if (Info.BuildingCommonNames.StaticAntiAir.Contains(actorType))
-				return (int)NNBuildingPlacementType.AADefense;
-
-			if (Info.BuildingCommonNames.Refinery.Contains(actorType))
-				return (int)NNBuildingPlacementType.Refinery;
-
-			if (Info.BuildingCommonNames.Power.Contains(actorType))
-				return (int)NNBuildingPlacementType.Power;
-
-			if (Info.BuildingCommonNames.NNTech.Contains(actorType))
-				return (int)NNBuildingPlacementType.Tech;
-			
-			if (Info.BuildingCommonNames.NNTier3Tech.Contains(actorType))
-				return (int)NNBuildingPlacementType.Tier3Tech;
-
-			if (Info.BuildingCommonNames.SuperWeapon.Contains(actorType))
-				return (int)NNBuildingPlacementType.SuperWeapon;
-
-			return (int)NNBuildingPlacementType.Other;
-		}
-
-		public CPos? NNChooseBuildLocation(string actorType)
-		{
-			// Alright, we can have multiple MCVs but that can be added later by adding another small network.
-			CPos center = GetRandomBaseCenter();
-
-			int HSZ = 16;
-			int SZ = 32;
-			var c1 = new CPos(center.X - HSZ, center.Y - HSZ);
-			var c2 = new CPos(c1.X + SZ, c1.Y + SZ);
-
-			// It doesn't makes much sense to use name <-> type intger in this context.
-			// Hence using building categorizer.
-			// 0. Production, 1. Defense, 2. AADefense, 3. Refinery, 4. Tech, 5. Tier3Tech, 6. SuperWeapon, 7. Power, 8. Other
-			// 9. Ore patch, to determine ref position
-			// 10. Non-enterable area (to find defensive pos)
-			// 11. Placable tiles, to restrict placement choice
-			// 12. (sent with request string) direction to enemy
-			// 13. (sent with string) the category of the building we want to place
-			// There are many channels but fortunately, all the values are intended to be binary.
-			var features = new List<int[]>(); // sparse features: x, y, ch.
-
-			var buildings = World.ActorsHavingTrait<Building>().Where(b => b.Owner == Player);
-			foreach (var b in buildings)
-			{
-				var loc = b.Location - c1;
-				if (loc.X < 0 || loc.Y < 0 || loc.X >= SZ || loc.Y >= SZ)
-					continue;
-				int ch = NNBuildingTypeToInt(b.Info.Name);
-				features.Add(new int[3] { loc.X, loc.Y, ch });
-			}
-
-			// Resources
-			for (int u = 0; u < SZ; u++)
-				for (int v = 0; v < SZ; v++)
-				{
-					var loc = new CPos(c1.X + v, c1.Y + u);
-					if (World.Map.Contains(loc) && resLayer.GetResource(loc) != null)
-						features.Add(new int[3] { v, u, 9 });
-				}
-
-			// To be accurate, need MOBILE trait, not terrain. Trees aren't enterable, as you know.
-			for (int u = 0; u < SZ; u++)
-				for (int v = 0; v < SZ; v++)
-				{
-					var pos = new CPos(c1.X + v, c1.Y + u);
-					if (World.Map.Contains(pos)
-							&& Info.NNBuildingPlacerTerrainTypes.Contains(World.Map.GetTerrainInfo(pos).Type))
-						features.Add(new int[3] { v, u, 10 });
-				}
-
-			// placaeble
-			var bi = Map.Rules.Actors[actorType].TraitInfoOrDefault<BuildingInfo>();
-			if (bi == null)
-				return null;
-			int placeableCnt = 0;
-			foreach (var t in World.Map.FindTilesInCircle(center, Info.MaxBaseRadius))
-			{
-				if (World.Map.Contains(t) && World.CanPlaceBuilding(actorType, bi, t, null)
-					&& bi.IsCloseEnoughToBase(World, Player, actorType, t))
-				{
-					var loc = t - c1;
-					if (loc.X < 0 || loc.Y < 0 || loc.X >= SZ || loc.Y >= SZ)
-						continue;
-					features.Add(new int[3] { loc.X, loc.Y, 11 });
-					placeableCnt++;
-				}
-			}
-
-			if (placeableCnt == 0)
-				return null;
-
-			var rawData = new byte[3 * features.Count()];
-			int i = 0;
-			foreach (var coord in features)
-			{
-				rawData[i]   = (byte) coord[0];
-				rawData[i+1] = (byte) coord[1];
-				rawData[i+2] = (byte) coord[2];
-				i += 3;
-			}
-
-			var directionToEnemy = DirectionToEnemy(center);
-			if (directionToEnemy == null)
-				return null; // should have won already
-
-			//int2 selfLocation = cpos2uv(location);
-			string msg = "BUILDING_PLACEMENT_QUERY";
-			msg += " " + CanonicalAIName(Player);
-			msg += " " + directionToEnemy.Value.X;
-			msg += " " + directionToEnemy.Value.Y;
-			msg += " " + NNBuildingTypeToInt(actorType);
-
-			int2? xy;
-			clientLock.WaitOne();
-			{
-				Send(msg);
-				client.Send(rawData, rawData.Length);
-				xy = ReceiveCoordinate(SZ);
-			}
-			clientLock.Release();
-
-			if (xy == null)
-				return null;
-
-			return new CPos(c1.X + xy.Value.X, c1.Y + xy.Value.Y);
-		}
-
 		// Returns negative number when unable to count (no harvester for this player).
 		int CountHarvestableCellsInRadius(CPos center, int radius)
 		{
@@ -2466,16 +2240,16 @@ namespace OpenRA.Mods.Common.AI
 					}
 		}
 
+		public bool IsStaticAntiAir(Actor a)
+		{
+			return Info.BuildingCommonNames.StaticAntiAir.Contains(a.Info.Name);
+		}
+
 		public bool IsEnemyUnit(Actor a)
 		{
 			return !a.IsDead && !a.Disposed && IsOwnedByEnemy(a)
 				&& !a.Info.HasTraitInfo<HuskInfo>()
 				&& a.Info.HasTraitInfo<ITargetableInfo>();
-		}
-
-		public bool IsStaticAntiAir(Actor a)
-		{
-			return Info.BuildingCommonNames.StaticAntiAir.Contains(a.Info.Name);
 		}
 
 		public bool IsStaticDefense(Actor a)
@@ -2500,7 +2274,7 @@ namespace OpenRA.Mods.Common.AI
 
 		public bool IsNavalBuilding(Actor a)
 		{
-			return Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name);
+			return IsNavalBuilding(a.Info.Name);
 		}
 	}
 }

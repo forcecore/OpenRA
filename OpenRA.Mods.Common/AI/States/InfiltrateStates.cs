@@ -45,24 +45,23 @@ namespace OpenRA.Mods.Common.AI
 				enemyBuildings = owner.World.FindActorsInCircle(
 						owner.World.Map.CenterOfCell(owner.Bot.AttackCenter.Value),
 						WDist.FromCells(20))
-					.Where(b => owner.Bot.IsOwnedByEnemy(b) && !b.IsDead && !b.Disposed);
+					.Where(owner.Bot.IsEnemyUnit);
 			else
-				enemyBuildings = owner.World.ActorsHavingTrait<Building>().Where(b
-					=> owner.Bot.IsOwnedByEnemy(b) && !b.IsDead && !b.Disposed);
+				enemyBuildings = owner.World.ActorsHavingTrait<Building>().Where(owner.Bot.IsEnemyUnit);
 			if (!enemyBuildings.Any())
 			{
 				// We should have won by now, unless, short game.
 				return;
 			}
 
-			var defenses = enemyBuildings.Where(a => owner.Bot.Info.BuildingCommonNames.Defense.Contains(a.Info.Name));
+			var defenses = enemyBuildings.Where(owner.Bot.IsStaticDefense);
 			if (!defenses.Any())
 			{
 				// We are in good situation :) No need for path finding.
 				return;
 			}
 
-			enemyBuildings = enemyBuildings.Where(a => !owner.Bot.Info.BuildingCommonNames.Defense.Contains(a.Info.Name));
+			enemyBuildings = enemyBuildings.Where(a => !owner.Bot.IsStaticDefense(a));
 			path = FindSafeRoute(owner, enemyBuildings, defenses);
 			if (path.Count == 0)
 			{
@@ -76,6 +75,7 @@ namespace OpenRA.Mods.Common.AI
 				path.RemoveAt(0);
 
 			// Use beacon to show path haha
+			/*
 			foreach (var p in path)
 			{
 				var position = owner.World.Map.CenterOfCell(p);
@@ -84,6 +84,7 @@ namespace OpenRA.Mods.Common.AI
 					beacon.IsPlayerPalette, beacon.BeaconImage, beacon.ArrowSequence, beacon.CircleSequence);
 				owner.Bot.Player.PlayerActor.World.AddFrameEndTask(w => w.Add(playerBeacon));
 			}
+			*/
 		}
 
 		public void Tick(Squad owner)
@@ -121,11 +122,13 @@ namespace OpenRA.Mods.Common.AI
 				if (tries++ > MaxTries)
 					break; // and fall to attack move mode.
 
+				/* Debug beacon
 				var position = owner.World.Map.CenterOfCell(p);
 				var beacon = owner.Bot.Player.PlayerActor.Info.TraitInfo<PlaceBeaconInfo>();
 				var playerBeacon = new Effects.Beacon(owner.Bot.Player, position, 10 * 25, beacon.Palette,
 					beacon.IsPlayerPalette, beacon.BeaconImage, beacon.ArrowSequence, beacon.CircleSequence);
 				owner.Bot.Player.PlayerActor.World.AddFrameEndTask(w => w.Add(playerBeacon));
+				*/
 
 				return;
 			}

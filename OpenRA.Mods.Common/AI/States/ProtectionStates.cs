@@ -33,7 +33,7 @@ namespace OpenRA.Mods.Common.AI
 				return true;
 
 			// Is it seige unit?
-			if (owner.Bot.Info.UnitsCommonNames.Seige.Contains(target.Info.Name))
+			if (owner.Bot.IsSeigeUnit(target))
 				return true;
 
 			return false;

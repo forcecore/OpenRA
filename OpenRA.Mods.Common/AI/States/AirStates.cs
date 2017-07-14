@@ -204,7 +204,7 @@ namespace OpenRA.Mods.Common.AI
 			var anyUnit = owner.Units.First();
 			return owner.World.ActorsHavingTrait<Building>().Where(b => // from buildings,
 				b.AppearsHostileTo(anyUnit) && // enemy building and
-				owner.Bot.Info.BuildingCommonNames.StaticAntiAir.Contains(b.Info.Name)); // registered in Static AA.
+				owner.Bot.IsStaticAntiAir(b));
 		}
 	}
 

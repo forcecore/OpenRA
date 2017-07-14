@@ -17,6 +17,7 @@ using OpenRA.Activities;
 using OpenRA.Graphics;
 using OpenRA.Network;
 using OpenRA.Primitives;
+using OpenRA.Support;
 
 namespace OpenRA.Traits
 {
@@ -335,6 +336,23 @@ namespace OpenRA.Traits
 	{
 		void Activate(Player p);
 		IBotInfo Info { get; }
+
+		Player Player { get; }
+		void QueueOrder(Order order);
+		MersenneTwister Random { get; }
+		bool IsEnemyUnit(Actor a);
+		CPos? AttackCenter { get; }
+		World World { get; }
+		int MaxBaseRadius { get; }
+		CPos GetRandomBaseCenter();
+
+		bool IsNavalBuilding(string name);
+		bool IsNavalBuilding(Actor a);
+
+		bool IsStaticAntiAir(Actor a);
+		bool IsStaticDefense(Actor a);
+		bool IsSeigeUnit(Actor a);
+		bool IsFriendlyUnitTargeter(Actor a); // e.g., healer
 	}
 
 	public interface IRenderOverlay { void Render(WorldRenderer wr); }

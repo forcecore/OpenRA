@@ -206,8 +206,8 @@ namespace OpenRA
 				"cfb65ac53a1d0b9089953cd177cb10ba17b64cec", // winter storm
 				"368c16bf4be5668e1423ab22a72346be4a8f0254", // bad neighbors
 				"e4b6a8614527e698744b2909a881c1594228d9cd", // cross fire
-				"e08f4382ffe8c7f4d9937cf635edeb0c498cf3f7", // ghost town
-				"8f0b4ab3945a77a3e597c5be9d64a9d80658da0d", // x lake
+				//"e08f4382ffe8c7f4d9937cf635edeb0c498cf3f7", // ghost town (bad for ants)
+				//"8f0b4ab3945a77a3e597c5be9d64a9d80658da0d", // x lake: too big. I want more games not long games
 				"a6099b1fe4f49878aa968d530613cc7805626fab" // north by north west
 			};
 			var replay = OrderManager.Connection as ReplayConnection;
@@ -230,6 +230,9 @@ namespace OpenRA
 					"Unleashed AI", "Baseline AI", "Rush AI",
 					"Unleashed AI", "Baseline AI", "Rush AI",
 					"Unleashed AI", "Baseline AI", "Rush AI"
+					//"Baseline AI", "Rush AI",
+					//"Baseline AI", "Rush AI",
+					//"Baseline AI", "Rush AI"
 				};
 				var bot = bots.Random(worldRenderer.World.SharedRandom);
 

@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System;
+using OpenRA.Support;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.AI
@@ -38,6 +40,99 @@ namespace OpenRA.Mods.Common.AI
 			Enabled = true;
 		}
 
+		public void QueueOrder(Order order)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsStaticAntiAir(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsEnemyUnit(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsStaticDefense(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsSeigeUnit(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsFriendlyUnitTargeter(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsNavalBuilding(string name)
+		{
+			throw new NotImplementedException();
+		}
+
+		public bool IsNavalBuilding(Actor a)
+		{
+			throw new NotImplementedException();
+		}
+
+		public CPos GetRandomBaseCenter()
+		{
+			throw new NotImplementedException();
+		}
+
 		IBotInfo IBot.Info { get { return info; } }
+
+		public Player Player
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
+
+		public MersenneTwister Random
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
+
+		public int GetNextSuperweaponScanTime
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
+
+		public CPos? AttackCenter
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
+
+		public World World
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
+
+		public int MaxBaseRadius
+		{
+			get
+			{
+				throw new NotImplementedException();
+			}
+		}
 	}
 }

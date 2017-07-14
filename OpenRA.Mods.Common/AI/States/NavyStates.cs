@@ -29,7 +29,7 @@ namespace OpenRA.Mods.Common.AI
 
 			// For ships, cheat and move towards enemy naval production, if any.
 			var t = owner.World.Actors.Where(a
-				=> owner.Bot.Info.BuildingCommonNames.NavalProduction.Contains(a.Info.Name)
+				=> owner.Bot.IsNavalBuilding(a)
 				&& a.AppearsHostileTo(owner.Bot.Player.PlayerActor)).FirstOrDefault();
 
 			// If naval yard is far away, return it.
@@ -133,7 +133,7 @@ namespace OpenRA.Mods.Common.AI
 			{
 				var enemies = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(12))
 					.Where(a1 => !a1.Disposed && !a1.IsDead);
-				var enemynearby = enemies.Where(a1 => a1.Info.HasTraitInfo<ITargetableInfo>() && owner.Bot.IsOwnedByEnemy(a1));
+				var enemynearby = enemies.Where(owner.Bot.IsEnemyUnit);
 				var target = enemynearby.ClosestTo(leader.CenterPosition);
 				if (target != null)
 				{

@@ -26,7 +26,7 @@ namespace OpenRA.Mods.Common.AI
 		protected static void GoToRandomOwnBuilding(Squad squad)
 		{
 			CPos loc;
-			var nearByBuildings = squad.World.FindActorsInCircle(squad.CenterPosition, WDist.FromCells(squad.Bot.Info.MaxBaseRadius))
+			var nearByBuildings = squad.World.FindActorsInCircle(squad.CenterPosition, WDist.FromCells(squad.Bot.MaxBaseRadius))
 				.Where(b => b.Owner == squad.Bot.Player && b.TraitOrDefault<Building>() != null);
 			if (nearByBuildings.Any())
 				loc = nearByBuildings.Random(squad.Bot.Random).Location;

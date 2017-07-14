@@ -24,22 +24,6 @@ namespace OpenRA.Mods.Common.AI
 		{
 			return base.ShouldFlee(owner, enemies => !AttackOrFleeFuzzy.Default.CanAttack(owner.Units, enemies));
 		}
-
-		protected void LogBattle(Squad owner, string prefix)
-		{
-			var stats = owner.Bot.Player.PlayerActor.Trait<PlayerStatistics>();
-			//owner.Bot.Send(prefix + "_MY_DEATH_COST");
-			owner.Bot.Send(prefix + "_DEATH_COST");
-			owner.Bot.Send(owner.Bot.Player.InternalName);
-			owner.Bot.Send(stats.DeathsCost.ToString());
-
-			//owner.Bot.Send(prefix + "_ENEMY_DEATH_COST");
-			var enemy = owner.World.Players.Where(p => p.InternalName.ToLower().StartsWith("multi") && p != owner.Bot.Player).First();
-			var stats2 = enemy.PlayerActor.Trait<PlayerStatistics>();
-			owner.Bot.Send(enemy.InternalName);
-			owner.Bot.Send(stats2.DeathsCost.ToString());
-			owner.Bot.Send("END");
-		}
 	}
 
 	class GroundUnitsIdleState : GroundStateBase, IState
@@ -110,10 +94,9 @@ namespace OpenRA.Mods.Common.AI
 				enemyBuildings = owner.World.FindActorsInCircle(
 						owner.World.Map.CenterOfCell(owner.Bot.AttackCenter.Value),
 						WDist.FromCells(20))
-					.Where(b => owner.Bot.IsOwnedByEnemy(b) && !b.IsDead && !b.Disposed);
+					.Where(owner.Bot.IsEnemyUnit);
 			else
-				enemyBuildings = owner.World.ActorsHavingTrait<Building>().Where(b
-					=> owner.Bot.IsOwnedByEnemy(b) && !b.IsDead && !b.Disposed);
+				enemyBuildings = owner.World.ActorsHavingTrait<Building>().Where(owner.Bot.IsEnemyUnit);
 			if (!enemyBuildings.Any())
 			{
 				// We should have won by now, unless, short game.
@@ -121,7 +104,7 @@ namespace OpenRA.Mods.Common.AI
 				return;
 			}
 
-			var defenses = enemyBuildings.Where(a => owner.Bot.Info.BuildingCommonNames.Defense.Contains(a.Info.Name));
+			var defenses = enemyBuildings.Where(owner.Bot.IsStaticDefense);
 			if (!defenses.Any())
 			{
 				// We are in good situation :)
@@ -129,7 +112,7 @@ namespace OpenRA.Mods.Common.AI
 				return;
 			}
 
-			enemyBuildings = enemyBuildings.Where(a => !owner.Bot.Info.BuildingCommonNames.Defense.Contains(a.Info.Name));
+			enemyBuildings = enemyBuildings.Where(b => !owner.Bot.IsStaticDefense(b));
 			path = FindSafeRoute(owner, enemyBuildings, defenses);
 			if (path.Count == 0)
 			{
@@ -172,7 +155,7 @@ namespace OpenRA.Mods.Common.AI
 			// Scan nearby enemies and if they are near, switch to attack mode.
 			var enemies = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(5))
 				.Where(a1 => !a1.Disposed && !a1.IsDead);
-			var enemynearby = enemies.Where(a1 => a1.Info.HasTraitInfo<ITargetableInfo>() && owner.Bot.IsOwnedByEnemy(a1));
+			var enemynearby = enemies.Where(owner.Bot.IsStaticDefense);
 			if (enemynearby.Any(a => a.Info.TraitInfoOrDefault<AircraftInfo>() == null)) // must be non-aircraft enemy.
 			{
 				owner.FuzzyStateMachine.ChangeState(owner, new GroundUnitsAttackState(), true);
@@ -264,7 +247,7 @@ namespace OpenRA.Mods.Common.AI
 		CPos? FindSeigePoint(Squad owner, Actor target)
 		{
 			var world = owner.World;
-			var seige = owner.Units.First(a => owner.Bot.Info.UnitsCommonNames.Seige.Contains(a.Info.Name));
+			var seige = owner.Units.First(owner.Bot.IsSeigeUnit);
 			var maxRangeSq = seige.TraitsImplementing<Armament>().Min(a => a.MaxRange()).LengthSquared;
 			var pathFinder = world.WorldActor.Trait<IPathFinder>();
 			var mobileInfo = seige.Info.TraitInfo<MobileInfo>();
@@ -323,7 +306,7 @@ namespace OpenRA.Mods.Common.AI
 			// Let's check enemy status, near this squad.
 			var enemies = owner.World.FindActorsInCircle(leader.CenterPosition, WDist.FromCells(10))
 				.Where(a1 => !a1.Disposed && !a1.IsDead);
-			var enemynearby = enemies.Where(a1 => a1.Info.HasTraitInfo<ITargetableInfo>() && owner.Bot.IsOwnedByEnemy(a1));
+			var enemynearby = enemies.Where(owner.Bot.IsEnemyUnit);
 			var target = enemynearby.ClosestTo(leader.CenterPosition);
 			if (target == null)
 				goto exit_with_attack_move;
@@ -331,7 +314,7 @@ namespace OpenRA.Mods.Common.AI
 			// There's enemy near enough to this squad. Start attacking.
 
 			// Do they have base defenses?
-			if (!enemies.Any(a => owner.Bot.Info.BuildingCommonNames.Defense.Contains(a.Info.Name)))
+			if (!enemies.Any(owner.Bot.IsStaticDefense))
 			{
 				// Nope. Engage!
 				owner.TargetActor = target;
@@ -344,7 +327,7 @@ namespace OpenRA.Mods.Common.AI
 				// Don't bother seige. We can overwhelm them, unless we have a very OP defense in some crazy mod.
 				// In case of such mod, it is the fun of the player to see units get busted :)
 			}
-			else if (owner.Units.Any(a => owner.Bot.Info.UnitsCommonNames.Seige.Contains(a.Info.Name)))
+			else if (owner.Units.Any(owner.Bot.IsSeigeUnit))
 			{
 				// Fortunately, we got seige units. Attack move into range of the seige unit.
 				// Don't bother finding the defense structure. It's enought to move in and attack any target.
@@ -406,7 +389,14 @@ namespace OpenRA.Mods.Common.AI
 			var targetActor = FindClosestEnemy(owner);
 			foreach (var a in owner.Units)
 				if (!BusyAttack(a))
-					owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = targetActor });
+				{
+					if (!a.TraitsImplementing<Armament>().Any()) // no weapon, like mgg, mrj
+						owner.Bot.QueueOrder(new Order("AttackMove", a, false) { TargetLocation = targetActor.Location });
+					else if (owner.Bot.IsFriendlyUnitTargeter(a))
+						owner.Bot.QueueOrder(new Order("AttackMove", a, false) { TargetLocation = targetActor.Location });
+					else
+						owner.Bot.QueueOrder(new Order("Attack", a, false) { TargetActor = targetActor });
+				}
 
 			// Wiped out
 			//if (!owner.IsValid)
