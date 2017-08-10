@@ -79,6 +79,18 @@ namespace OpenRA.Mods.Common.Traits
 
 			foreach (var d in serviceDocks)
 			{
+			
+				List<CPos> path;
+
+				using (var thePath = PathSearch.FromPoint(client.World, client.Info.TraitInfo<MobileInfo>(),
+					client, client.Location, d.Location, true))
+					path = client.World.WorldActor.Trait<IPathFinder>().FindPath(thePath);
+
+				if (path.Count <= 0 && (client.CenterPosition - d.CenterPosition).LengthSquared >= WDist.FromCells(1).LengthSquared)
+				{
+					continue;
+				}
+			
 				if (d.Reserver == null)
 					return true;
 				if (d.Reserver == client)
@@ -394,7 +406,7 @@ namespace OpenRA.Mods.Common.Traits
 			while (queue.Count > 0)
 			{
 				// find the first available slot in the service docks.
-				var serviceDock = serviceDocks.FirstOrDefault(d => d.Reserver == null && !d.IsBlocked);
+				var serviceDock = serviceDocks.FirstOrDefault(d => d.Reserver == null && !d.IsBlocked && CantAccesDock(client,d.Location));
 				if (serviceDock == null)
 					break;
 				var head = NearestClient(host, serviceDock, queue);
@@ -411,6 +423,26 @@ namespace OpenRA.Mods.Common.Traits
 				return;
 
 			ServeNewClient(client);
+		}
+		
+		public bool CantAccesDock(Actor client, CPos Dock)
+		{
+			
+			List<CPos> path;
+
+			using (var thePath = PathSearch.FromPoint(client.World, client.Info.TraitInfo<MobileInfo>(),
+				client, client.Location, Dock, true))
+				path = client.World.WorldActor.Trait<IPathFinder>().FindPath(thePath);
+					
+			Game.Debug("Path: " + path.Count);
+			Game.Debug("Distance: " + (client.Location - Dock).LengthSquared);
+
+			if (path.Count <= 0 && (client.Location - Dock).LengthSquared > new CVec(1,1).LengthSquared)
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		public static bool IsInQueue(Actor host, Actor client)
