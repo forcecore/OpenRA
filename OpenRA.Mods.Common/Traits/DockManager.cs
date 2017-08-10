@@ -427,22 +427,22 @@ namespace OpenRA.Mods.Common.Traits
 		
 		public bool CantAccesDock(Actor client, CPos Dock)
 		{
-			
-			List<CPos> path;
-
-			using (var thePath = PathSearch.FromPoint(client.World, client.Info.TraitInfo<MobileInfo>(),
-				client, client.Location, Dock, true))
-				path = client.World.WorldActor.Trait<IPathFinder>().FindPath(thePath);
-					
-			Game.Debug("Path: " + path.Count);
-			Game.Debug("Distance: " + (client.Location - Dock).LengthSquared);
-
-			if (path.Count <= 0 && (client.Location - Dock).LengthSquared > new CVec(1,1).LengthSquared)
+			if (client != null && Dock != null)
 			{
-				return false;
-			}
 
-			return true;
+				List<CPos> path;
+
+				using (var thePath = PathSearch.FromPoint(client.World, client.Info.TraitInfo<MobileInfo>(),
+					client, client.Location, Dock.Location, true))
+					path = client.World.WorldActor.Trait<IPathFinder>().FindPath(thePath);
+
+				if (path.Count <= 0 && (client.Location - Dock.Location).LengthSquared > new CVec(1, 1).LengthSquared)
+				{
+					return false;
+				}
+				return true;
+			}
+			return false;
 		}
 
 		public static bool IsInQueue(Actor host, Actor client)
