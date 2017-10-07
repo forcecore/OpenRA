@@ -301,10 +301,4 @@ namespace OpenRA.Mods.Common.Traits
 		void OnAcceptingCash(Actor self, Actor donor);
 		void OnDeliveringCash(Actor self, Actor acceptor);
 	}
-
-	public interface INotifyCashTransfer
-	{
-		void OnAcceptingCash(Actor self, Actor donor);
-		void OnDeliveringCash(Actor self, Actor acceptor);
-	}
 }

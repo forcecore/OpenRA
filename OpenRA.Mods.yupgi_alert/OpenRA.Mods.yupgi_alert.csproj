@@ -125,7 +125,6 @@
     <Compile Include="Traits\StructureChrono.cs" />
     <Compile Include="Traits\BaseSpawnerMaster.cs" />
     <Compile Include="Traits\Warheads\CreateRadioactivityWarhead.cs" />
-    <Compile Include="Traits\Render\WithAcceptDeliveredCashAnimation.cs" />
     <Compile Include="Traits\Warheads\TractorWarhead.cs" />
     <Compile Include="Traits\World\RadioactivityLayer.cs" />
   </ItemGroup>
