@@ -312,6 +312,9 @@ namespace OpenRA.Mods.Common.AI
 
 		public void Activate(Squad owner)
 		{
+			if (!owner.IsValid)
+				return;
+
 			escapeDest = RandomBuildingLocation(owner);
 			safePoint = CalcSafePoint(owner, escapeDest, EnemyStaticAAs(owner));
 		}
