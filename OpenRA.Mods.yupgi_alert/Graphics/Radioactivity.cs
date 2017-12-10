@@ -15,6 +15,7 @@
 
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using OpenRA.Effects;
 using OpenRA.Graphics;
 using OpenRA.Mods.Yupgi_alert.Traits;
@@ -30,7 +31,7 @@ namespace OpenRA.Mods.Yupgi_alert.Graphics
 		public int Ticks = 0;
 		public int Level = 0;
 		readonly RadioactivityLayer layer;
-		readonly WPos pos;
+		readonly WPos wpos;
 
 		public int ZOffset
 		{
@@ -40,9 +41,9 @@ namespace OpenRA.Mods.Yupgi_alert.Graphics
 			}
 		}
 
-		public Radioactivity(RadioactivityLayer layer, WPos pos)
+		public Radioactivity(RadioactivityLayer layer, WPos wpos)
 		{
-			this.pos = pos;
+			this.wpos = wpos;
 			this.layer = layer;
 		}
 
@@ -51,7 +52,7 @@ namespace OpenRA.Mods.Yupgi_alert.Graphics
 			Ticks = src.Ticks;
 			Level = src.Level;
 			layer = src.layer;
-			pos = src.pos;
+			wpos = src.wpos;
 		}
 
 		public IRenderable WithPalette(PaletteReference newPalette) { return this; }
@@ -62,7 +63,7 @@ namespace OpenRA.Mods.Yupgi_alert.Graphics
 		public PaletteReference Palette { get { return null; } }
 		public bool IsDecoration { get { return false; } }
 
-		public WPos Pos { get { return pos; } }
+		public WPos Pos { get { return wpos; } }
 
 		IFinalizedRenderable IRenderable.PrepareRender(WorldRenderer wr)
 		{
@@ -71,23 +72,49 @@ namespace OpenRA.Mods.Yupgi_alert.Graphics
 
 		public void Render(WorldRenderer wr)
 		{
-			var tl = wr.Screen3DPosition(pos - new WVec(512, 512, 0)); // cos 512 is half a cell.
-			var br = wr.Screen3DPosition(pos + new WVec(512, 512, 0));
+			var map = wr.World.Map;
+			var tileSet = wr.World.Map.Rules.TileSet;
+			var uv = map.CellContaining(wpos).ToMPos(map);
 
-			int level = this.Level > layer.Info.MaxLevel ? layer.Info.MaxLevel : this.Level;
+			if (!map.Height.Contains(uv))
+				return;
+
+			var height = (int)map.Height[uv];
+			var tile = map.Tiles[uv];
+			var ti = tileSet.GetTileInfo(tile);
+			var ramp = ti != null ? ti.RampType : 0;
+
+			var corners = map.Grid.CellCorners[ramp];
+			var pos = map.CenterOfCell(uv.ToCPos(map));
+			var screen = corners.Select(c => wr.Screen3DPxPosition(pos + c)).ToArray();
+
+			int level = this.Level.Clamp(0, layer.Info.MaxLevel); // Saturate the visualization to MaxLevel
 			if (level == 0)
 				return; // don't visualize 0 cells. They show up before cells get removed.
 
 			int alpha = (layer.YIntercept100 + layer.Slope100 * level) / 100; // Linear interpolation
-			alpha = alpha > 255 ? 255 : alpha; // just to be safe.
+			alpha = alpha.Clamp(0, 255); // Just to be safe.
 
-			Color color = Color.FromArgb(alpha, layer.Info.Color);
-			Game.Renderer.WorldRgbaColorRenderer.FillRect(tl, br, color);
+			/*
+			for (var i = 0; i < 4; i++)
+			{
+				var j = (i + 1) % 4;
+				Game.Renderer.WorldRgbaColorRenderer.DrawLine(screen[i], screen[j], 3,
+					Color.FromArgb(alpha, layer.Info.Color),
+					Color.FromArgb(alpha, layer.Info.Color));
+			}
+			*/
+
+			Game.Renderer.WorldRgbaColorRenderer.FillTriangle(screen[0], screen[1], screen[2], Color.FromArgb(alpha, layer.Info.Color));
+			Game.Renderer.WorldRgbaColorRenderer.FillTriangle(screen[2], screen[3], screen[0], Color.FromArgb(alpha, layer.Info.Color));
 
 			// mix in yellow so that the radion shines brightly, after certain threshold.
 			// It is different than tinting the info.color itself and provides nicer look.
 			if (alpha > layer.Info.MixThreshold)
-				Game.Renderer.WorldRgbaColorRenderer.FillRect(tl, br, Color.FromArgb(16, layer.Info.Color2));
+			{
+				Game.Renderer.WorldRgbaColorRenderer.FillTriangle(screen[0], screen[1], screen[2], Color.FromArgb(16, layer.Info.Color2));
+				Game.Renderer.WorldRgbaColorRenderer.FillTriangle(screen[2], screen[3], screen[0], Color.FromArgb(16, layer.Info.Color2));
+			}
 
 			/* Let's actually see the level numbers
 			var text = "{0}".F(Level);
