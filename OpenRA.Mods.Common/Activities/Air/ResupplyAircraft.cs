@@ -35,6 +35,9 @@ namespace OpenRA.Mods.Common.Activities
 
 		public override Activity Tick(Actor self)
 		{
+			if (resupplyActivities == null)
+				return NextActivity;
+
 			int cnt = 0;
 			for (int i = 0; i < resupplyActivities.Length; i++)
 			{
