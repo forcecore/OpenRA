@@ -1,3 +1,12 @@
 {
-	"omnisharp.enableRoslynAnalyzers": true
+	"omnisharp.enableRoslynAnalyzers": true,
+	"files.exclude": {
+		"**/.git": true,         // this is a default value
+        "**/.DS_Store": true,    // this is a default value
+
+        "mods": true, // this excludes all folders
+                      // named "node_modules" from
+                      // the explore tree
+        "bin": true  // ignore binary compile folder
+	}
 }

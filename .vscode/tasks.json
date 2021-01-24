@@ -8,6 +8,14 @@
 			"windows": {
 				"command": "make.cmd"
 			}
+		},
+		{
+			"label": "build_debug",
+			"command": "make",
+			"args": ["check"],
+			"windows": {
+				"command": "make.cmd"
+			}
 		}
 	]
 }

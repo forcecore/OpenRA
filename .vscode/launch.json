@@ -2,6 +2,20 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Launch (OPMod)",
+			"type": "clr",
+			"linux": {
+				"type": "mono"
+			},
+			"osx": {
+				"type": "mono"
+			},
+			"request": "launch",
+			"program": "${workspaceRoot}/bin/OpenRA.exe",
+			"args": ["Game.Mod=yupgi_alert0", "Engine.EngineDir=.."],
+			"preLaunchTask": "build_debug",
+		},
+		{
 			"name": "Launch (TD)",
 			"type": "clr",
 			"linux": {
