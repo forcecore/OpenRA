@@ -2,6 +2,17 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Launch (OPMod)",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceRoot}/bin/OpenRA.dll",
+			"windows": {
+				"program": "${workspaceRoot}/bin/OpenRA.exe",
+			},
+			"args": ["Game.Mod=yupgi_alert0", "Engine.EngineDir=.."],
+			"preLaunchTask": "build_debug",
+		},
+		{
 			"name": "Launch (TD)",
 			"type": "coreclr",
 			"request": "launch",
