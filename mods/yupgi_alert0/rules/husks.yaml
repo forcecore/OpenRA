@@ -147,6 +147,26 @@ BADR.Husk:
 		Image: badr
 	-RevealOnDeath:
 
+ZEP.Husk:
+	Inherits: ^PlaneHusk
+	Tooltip:
+		Name: Kirov Bomber
+	Aircraft:
+		TurnSpeed: 20
+		Speed: 149
+	SmokeTrailWhenDamaged@0:
+		Offset: -432,560,0
+		Interval: 2
+		MinDamage: Undamaged
+	SmokeTrailWhenDamaged@1:
+		Offset: -432,-560,0
+		Interval: 2
+		MinDamage: Undamaged
+	RenderSprites:
+		Image: zep
+		PlayerPalette: player-ra2
+	-RevealOnDeath:
+
 MIG.Husk:
 	Inherits: ^PlaneHusk
 	Tooltip:

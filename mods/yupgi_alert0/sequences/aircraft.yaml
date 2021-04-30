@@ -74,6 +74,11 @@ badr:
 	idle:
 		Facings: 16
 
+zep:
+	icon: zepicon
+	idle:
+		Facings: 32
+
 mh60:
 	idle:
 		Facings: 32

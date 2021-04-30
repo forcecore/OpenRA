@@ -1,3 +1,7 @@
+# Over Powered Mod, Engine and the Mod
+
+* Please use partial clone if you just want the engine!
+
 # OpenRA
 
 A Libre/Free Real Time Strategy game engine supporting early Westwood classics.

@@ -48,6 +48,45 @@ BADR.Bomber:
 	Armament:
 		Weapon: ParaBomb
 
+ZEP.Bomber:
+	Inherits: ^NeutralPlane
+	Armor:
+		Type: Heavy
+	Health:
+		HP: 300000
+	Aircraft:
+		CruiseAltitude: 2560
+		TurnSpeed: 20
+		Speed: 18
+		Repulsable: False
+		MaximumPitch: 56
+	-Voiced:
+	Tooltip:
+		Name: Kirov Bomber
+	Contrail@1:
+		Offset: -432,560,0
+	Contrail@2:
+		Offset: -432,-560,0
+	SpawnActorOnDeath:
+		Actor: ZEP.Husk
+	SmokeTrailWhenDamaged@0:
+		Offset: -432,560,0
+		Interval: 2
+	SmokeTrailWhenDamaged@1:
+		Offset: -432,-560,0
+		Interval: 2
+	-EjectOnDeath:
+	RejectsOrders:
+	GivesExperience:
+		Experience: 1000
+	-MapEditorData:
+	RenderSprites:
+		Image: zep
+		PlayerPalette: player-ra2
+	AttackBomber:
+	Armament:
+		Weapon: ZepBomb
+
 MIG:
 	Inherits: ^Plane
 	Inherits@AUTOTARGET: ^AutoTargetGroundAssaultMove

@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.Effects;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Primitives;
@@ -24,6 +25,8 @@ namespace OpenRA.Mods.Common.Traits
 		[ActorReference(typeof(AircraftInfo))]
 		public readonly string UnitType = "badr.bomber";
 		public readonly int SquadSize = 1;
+		public readonly int NumSquads = 1;
+		public readonly int SquadCreationInterval = 15;
 		public readonly WVec SquadOffset = new WVec(-1536, 1536, 0);
 
 		public readonly int QuantizedFacings = 32;
@@ -74,7 +77,21 @@ namespace OpenRA.Mods.Common.Traits
 			base.Activate(self, order, manager);
 
 			var facing = info.UseDirectionalTarget && order.ExtraData != uint.MaxValue ? (WAngle?)WAngle.FromFacing((int)order.ExtraData) : null;
-			SendAirstrike(self, order.Target.CenterPosition, facing);
+
+			for (var i = 0; i < info.NumSquads; i++)
+			{
+				if (i == 0)
+				{
+					SendAirstrike(self, order.Target.CenterPosition, facing);
+				}
+				else
+				{
+					self.World.Add(new DelayedAction(info.SquadCreationInterval * i, () =>
+					{
+						SendAirstrike(self, order.Target.CenterPosition, facing);
+					}));
+				}
+			}
 		}
 
 		public Actor[] SendAirstrike(Actor self, WPos target, WAngle? facing = null)

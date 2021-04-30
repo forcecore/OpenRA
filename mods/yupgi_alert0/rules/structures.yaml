@@ -1593,18 +1593,20 @@ AFLD:
 	AirstrikePower@parabombs:
 		OrderName: UkraineParabombs
 		Prerequisites: aircraft.ukraine
-		Icon: parabombs
+		Icon: carpetbomb
 		ChargeInterval: 7500
-		Description: Parabombs
-		LongDesc: A squad of Badgers drop parachuted\nbombs on your target.
+		Description: Carpet Bombing
+		LongDesc: An armada of Kirov Bombeers drop \nbombs on your target.
 		SelectTargetSpeechNotification: SelectTarget
 		CameraActor: camera
 		CameraRemoveDelay: 150
-		UnitType: badr.bomber
+		UnitType: zep.bomber
 		QuantizedFacings: 8
 		DisplayBeacon: true
-		BeaconPoster: pbmbicon
+		BeaconPoster: carpetbomb_beacon
 		SquadSize: 3
+		NumSquads: 10  # Repeatedly call the squads to bomb enemies back to stone age!
+		SquadCreationInterval: 300
 		SquadOffset: 1792,1792,0
 		ArrowSequence: arrow
 		ClockSequence: clock

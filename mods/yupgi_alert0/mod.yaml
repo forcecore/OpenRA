@@ -37,6 +37,7 @@ Packages:
 	ra|uibits
 	yupgi_alert0|bits/cameo
 	yupgi_alert0|bits/etc
+	yupgi_alert0|bits/shp
 
 MapFolders:
 	ra|maps: System

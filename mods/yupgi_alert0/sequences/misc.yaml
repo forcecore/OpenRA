@@ -167,6 +167,9 @@ beacon:
 	clock: beaconclock
 		Length: *
 		Offset: 0,-42
+	carpetbomb_beacon: carpetbomb_beacon
+		Length: *
+		Offset: 0,-42
 
 smoke_m:
 	idle:
@@ -505,6 +508,7 @@ icon:
 	gps: gpssicon
 	parabombs: pbmbicon
 	sonar: sonricon
+	carpetbomb: carpetbomb
 
 quee:
 	idle:
