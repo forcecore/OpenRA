@@ -1,0 +1,39 @@
+World:
+	-SpawnMPUnits:
+	-MPStartLocations:
+	LuaScript:
+		Scripts: map.lua
+	MapOptions:
+		Fog: False
+		Shroud: False
+	CrateSpawner:
+		CheckboxEnabled: False
+		CheckboxLocked: True
+	ObjectivesPanel:
+		PanelName: MISSION_OBJECTIVES
+
+Player:
+	-ConquestVictoryConditions:
+	Shroud:
+		FogCheckboxLocked: True
+		FogCheckboxEnabled: False
+		FogCheckboxVisible: True
+		ExploredMapCheckboxLocked: True
+		ExploredMapCheckboxEnabled: True
+		ExploredMapCheckboxVisible: True
+	MissionObjectives:
+		EarlyGameOver: true
+		GameOverDelay: 3000
+	ModularBot@CampaignAI:
+		Name: Campaign Player AI
+		Type: campaign
+
+TSLA:
+	Power:
+		Amount: 0
+
+^Husk:
+	ChangesHealth:
+		Step: -1000
+		StartIfBelow: 101
+		Delay: 1

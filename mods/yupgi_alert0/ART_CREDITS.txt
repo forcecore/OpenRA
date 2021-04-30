@@ -1,0 +1,83 @@
+The mod contains "NanumGothic" fonts released by Naver.
+See
+https://help.naver.com/support/contents/contents.nhn?serviceNo=1074&categoryNo=3497
+for full license info.
+
+Infester, Super Sonic Bomber, Mind Bender, Infester, Hydra, Magnetroll,
+    Highwayman
+    Nolt, of Nomad Galaxy mod (http://www.moddb.com/mods/nomad-galaxy)
+
+Fire ant unit shp is by me, made from Westwood's ant.
+    In that case I don't know how the license goes but I think you can use it
+    Same for Super ant, Hyper ant, Queen ant.
+
+Ant faction flag by MustaphaTR
+    Thank you for your great pixel art work for this mod!
+    https://github.com/forcecore/yupgi_alert0/issues/53
+
+Mig voxel by Mig Eater:
+    https://forums.revora.net/topic/75476-mig-144/
+
+Many icons are adapted from public domain or CC licensed images.
+My modified icons follow their respective licenses.
+
+Ant nest (for icon):
+    https://pixabay.com/en/ants-anthill-nature-colony-insects-633298/
+    https://pixabay.com/en/ant-macro-insect-red-nature-564617/
+
+Queen ant icon
+    https://pixabay.com/en/queen-ant-ant-ant-head-insect-1193472/
+
+Drone ant icon:
+    https://pixabay.com/en/ant-priroda-macro-947402/
+
+Fire ant icon:
+    https://pixabay.com/en/fire-ant-worker-macro-insect-bug-1091301/
+
+Warrior ant icon:
+    https://www.flickr.com/photos/testlab/21705773349
+    I made adaptations so that it looks better as an icon in 64x48 pixels XD
+    The license is:
+    https://creativecommons.org/licenses/by/2.0/
+
+Tunnel network icon:
+    http://www.publicdomainpictures.net/view-image.php?image=34714&picture=ant-nest
+
+Evolution chamber icon:
+    http://www.publicdomainpictures.net/view-image.php?image=31530&picture=structure-of-dna
+
+Hyper ant icon:
+    https://www.flickr.com/photos/ansk/25694669841
+    Adapted for icon.
+
+Super ant icon:
+    https://commons.wikimedia.org/wiki/File:Carpenter_Ant_(Camponotus_ligniperdus)_(13563515215).jpg
+    Adapted for icon.
+
+Buzzer hive icon:
+    https://commons.wikimedia.org/wiki/File:Formica_lugubris.jpg
+    Adapted for icon
+
+Church of Hydra icon:
+    https://commons.wikimedia.org/wiki/File:Hydra_magnipapillata.jpg
+    Adapted for icon
+
+Termite Infestation icon:
+    https://www.flickr.com/photos/robbie73/2586011987
+    Adapted for icon
+
+Termite Hill icon:
+    https://commons.wikimedia.org/wiki/File:Termite_hill_NT.jpg
+    Adapted for icon
+
+Adrenaline Colony / Adrenaline Explosion icon:
+    Fire background: https://pixabay.com/ko/%ED%99%94%EC%9E%AC-%EC%9E%A5%EC%9E%91%EB%B6%88-%EB%B6%88%EA%BD%83-%ED%99%94%EC%83%81-%EC%83%81%ED%91%9C-171230/
+    Adrenaline: https://commons.wikimedia.org/wiki/File:Adrenaline.svg
+
+Infester icon:
+    https://en.wikipedia.org/wiki/File:Yellow_mite_(Tydeidae)_Lorryia_formosa_2_edit.jpg
+    Adapted for icon
+
+Highwayman icon:
+    http://www.publicdomainpictures.net/view-image.php?image=121002&picture=black-horse
+    Adapted for icon
